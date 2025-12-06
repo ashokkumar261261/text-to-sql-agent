@@ -1,0 +1,25 @@
+{
+  "agentName": "TextToSQLAgent",
+  "description": "An AI agent that converts natural language queries into SQL statements",
+  "foundationModel": "anthropic.claude-3-sonnet-20240229-v1:0",
+  "instruction": "You are a SQL expert assistant. Your role is to convert natural language queries into valid SQL statements based on the provided database schema. Always generate syntactically correct SQL that can be executed safely.",
+  "actionGroups": [
+    {
+      "actionGroupName": "QueryGeneration",
+      "description": "Generate SQL queries from natural language",
+      "functions": [
+        {
+          "name": "generate_sql",
+          "description": "Convert natural language to SQL query",
+          "parameters": {
+            "query": {
+              "type": "string",
+              "description": "The natural language query to convert",
+              "required": true
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

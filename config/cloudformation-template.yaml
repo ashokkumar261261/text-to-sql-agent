@@ -1,0 +1,116 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Text-to-SQL Agent Infrastructure with Athena and Glue Catalog
+
+Parameters:
+  GlueDatabase:
+    Type: String
+    Description: Glue Catalog database name
+  AthenaOutputBucket:
+    Type: String
+    Description: S3 bucket for Athena query results (without s3:// prefix)
+  AthenaWorkgroup:
+    Type: String
+    Default: primary
+    Description: Athena workgroup name
+
+Resources:
+  # S3 Bucket for Athena Results
+  AthenaResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Ref AthenaOutputBucket
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldResults
+            Status: Enabled
+            ExpirationInDays: 7
+
+  # Lambda Execution Role
+  TextToSQLExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: TextToSQLPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - athena:StartQueryExecution
+                  - athena:GetQueryExecution
+                  - athena:GetQueryResults
+                  - athena:StopQueryExecution
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - glue:GetDatabase
+                  - glue:GetTable
+                  - glue:GetTables
+                  - glue:GetPartitions
+                Resource:
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:catalog'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:database/${GlueDatabase}'
+                  - !Sub 'arn:aws:glue:${AWS::Region}:${AWS::AccountId}:table/${GlueDatabase}/*'
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:PutObject
+                Resource:
+                  - !Sub 'arn:aws:s3:::${AthenaOutputBucket}'
+                  - !Sub 'arn:aws:s3:::${AthenaOutputBucket}/*'
+
+  # Lambda Function
+  TextToSQLFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: text-to-sql-agent
+      Handler: lambda/handler.lambda_handler
+      Runtime: python3.11
+      Timeout: 60
+      MemorySize: 1024
+      Role: !GetAtt TextToSQLExecutionRole.Arn
+      Environment:
+        Variables:
+          AWS_REGION: !Ref AWS::Region
+          BEDROCK_MODEL_ID: anthropic.claude-3-sonnet-20240229-v1:0
+          GLUE_DATABASE: !Ref GlueDatabase
+          ATHENA_OUTPUT_LOCATION: !Sub 's3://${AthenaOutputBucket}/results/'
+          ATHENA_WORKGROUP: !Ref AthenaWorkgroup
+      Events:
+        QueryApi:
+          Type: Api
+          Properties:
+            Path: /query
+            Method: post
+        OptionsApi:
+          Type: Api
+          Properties:
+            Path: /query
+            Method: options
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/query'
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt TextToSQLFunction.Arn
+  AthenaResultsBucket:
+    Description: S3 bucket for Athena results
+    Value: !Ref AthenaResultsBucket
