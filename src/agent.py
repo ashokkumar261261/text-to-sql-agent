@@ -192,28 +192,42 @@ class TextToSQLAgent:
         
         database_name = self.athena_manager.database
         
-        prompt = f"""You are an AWS Athena SQL expert. Convert the following natural language query into a valid Athena SQL statement.
+        prompt = f"""You are an AWS Athena SQL expert. Convert the natural language query into valid Athena SQL.
 
-Important Athena SQL Guidelines:
-- Use Presto/Trino SQL syntax (Athena's query engine)
-- ALWAYS use fully qualified table names: {database_name}.table_name
-- For date operations, use date_parse() or from_iso8601_timestamp()
-- Use CAST() for type conversions
-- Partition columns should be used in WHERE clauses when possible for better performance
-- String literals use single quotes
-- Use appropriate aggregate functions: COUNT, SUM, AVG, MIN, MAX
-- For JSON data, use json_extract() or json_extract_scalar()
+CRITICAL RULES:
+1. ALL table names MUST be prefixed with database: {database_name}.table_name
+2. Pay close attention to which columns belong to which table
+3. Use proper JOIN conditions when querying multiple tables
 
 Database: {database_name}
 
-Glue Catalog Schema:
+Schema (READ CAREFULLY - note which columns belong to which table):
 {schema_context}
+
+Example Queries:
+1. Simple query:
+   SELECT * FROM {database_name}.customers WHERE state = 'TX'
+
+2. Query with ORDER BY:
+   SELECT * FROM {database_name}.products ORDER BY price DESC LIMIT 5
+
+3. Query with JOIN (note: category is in orders table, not customers):
+   SELECT DISTINCT c.customer_id, c.name, c.email
+   FROM {database_name}.customers c
+   JOIN {database_name}.orders o ON c.customer_id = o.customer_id
+   WHERE o.category = 'Electronics'
+
+Athena SQL Guidelines:
+- Use Presto/Trino SQL syntax
+- ALWAYS prefix tables: {database_name}.table_name
+- Use table aliases (c, o, p) for clarity in JOINs
+- Check schema carefully for correct column names
+- Use single quotes for strings
+- Use DISTINCT to avoid duplicates in JOINs
 
 Natural Language Query: {query}
 
-IMPORTANT: Use fully qualified table names like {database_name}.customers, {database_name}.orders, etc.
-
-Generate ONLY the SQL query without any explanation. The query should be valid Athena SQL and executable.
+Generate ONLY the SQL query. No explanations.
 
 SQL Query:"""
 
@@ -257,6 +271,33 @@ SQL Query:"""
         
         # Clean up the SQL query
         sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
+        
+        # Auto-fix: Add database name if missing
+        sql_query = self._fix_table_names(sql_query, database_name)
+        
+        return sql_query
+    
+    def _fix_table_names(self, sql_query: str, database_name: str) -> str:
+        """Automatically add database name to table references if missing."""
+        import re
+        
+        # Get list of tables from schema
+        try:
+            tables = self.schema_manager.list_tables()
+        except:
+            tables = ['customers', 'orders', 'products']  # Fallback
+        
+        # For each table, replace "FROM table" with "FROM database.table"
+        for table in tables:
+            # Pattern: FROM table (not already prefixed)
+            pattern = r'\bFROM\s+(?!' + re.escape(database_name) + r'\.)(' + re.escape(table) + r')\b'
+            replacement = f'FROM {database_name}.\\1'
+            sql_query = re.sub(pattern, replacement, sql_query, flags=re.IGNORECASE)
+            
+            # Pattern: JOIN table (not already prefixed)
+            pattern = r'\bJOIN\s+(?!' + re.escape(database_name) + r'\.)(' + re.escape(table) + r')\b'
+            replacement = f'JOIN {database_name}.\\1'
+            sql_query = re.sub(pattern, replacement, sql_query, flags=re.IGNORECASE)
         
         return sql_query
 
