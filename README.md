@@ -6,6 +6,24 @@ An intelligent AI agent that converts natural language questions into SQL querie
 ![AWS](https://img.shields.io/badge/AWS-Bedrock%20%7C%20Athena%20%7C%20Glue-orange.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
+## 🆕 **NEW FEATURES ADDED!**
+
+🎉 **Enhanced Web UI with Authentication & Interactive Features**
+- 🔐 **Secure Login System** - Username/password authentication for public deployment
+- 📊 **Interactive Visualizations** - Customizable charts (Bar, Line, Scatter, Histogram, Box Plot)
+- 🗂️ **Sample Data Explorer** - Browse database schemas and sample data
+- 🎨 **Professional UI** - Clean interface without development artifacts
+- 💡 **Smart Query Suggestions** - AI-powered query recommendations
+- 📈 **Real-time Charts** - Dynamic visualizations with user-selectable axes
+
+🧠 **Advanced Knowledge Base Integration**
+- 📚 **Business Context Awareness** - Domain-specific terminology and rules
+- 🎯 **Intelligent Query Enhancement** - Context-aware SQL generation
+- 🔍 **Query Intent Analysis** - Understand complexity and requirements
+- 💼 **Business Rule Compliance** - Automated validation and suggestions
+
+> 🚀 **Ready for Production!** The enhanced web UI is now ready for public deployment with secure authentication and professional interface.
+
 ## ✨ Features
 
 ### Core Capabilities
@@ -69,13 +87,23 @@ python setup_glue_sample.py
 
 ### Usage
 
-#### Web UI (Recommended)
+#### 🌟 Enhanced Web UI (Recommended - NEW!)
 ```bash
-# Standard Web UI
-streamlit run web_ui.py
-
-# Enhanced Web UI with Knowledge Base
+# Launch the enhanced web interface with authentication and interactive features
 streamlit run web_ui_enhanced.py
+```
+
+**Features:**
+- 🔐 **Secure Login** - Demo accounts: `admin`/`admin123`, `demo`/`demo123`
+- 📊 **Interactive Charts** - Customize visualizations with drag-and-drop
+- 🗂️ **Data Explorer** - Browse schemas and sample data
+- 💡 **Smart Suggestions** - AI-powered query recommendations
+- 🎨 **Professional UI** - Clean, production-ready interface
+
+#### Standard Web UI
+```bash
+# Basic web interface (legacy)
+streamlit run web_ui.py
 ```
 
 #### Python API
@@ -118,16 +146,29 @@ python example_enhanced.py
 
 ## 🎯 Example Queries
 
-Try these natural language questions:
+Try these natural language questions in the **Enhanced Web UI**:
 
+### 📊 **Basic Analytics**
 ```
 "Show me all customers from Texas"
 "What are the top 5 products by price?"
 "Count total orders by status"
 "List all orders with total amount over $500"
-"Show me customers who ordered Electronics"
-"Calculate total revenue by category"
 ```
+
+### 🧠 **AI-Enhanced Queries** (NEW!)
+```
+"Show me premium customers with high lifetime value"
+"Find customers at risk of churning"
+"Analyze seasonal sales patterns"
+"Identify top-performing product categories"
+```
+
+### 📈 **Interactive Visualizations** (NEW!)
+- **Automatic Charts** - Generated based on your query results
+- **Customizable Axes** - Choose X/Y columns for different perspectives  
+- **Multiple Chart Types** - Bar, Line, Scatter, Histogram, Box plots
+- **Smart Filtering** - Excludes ID columns for cleaner visualizations
 
 ## 🏗️ Architecture
 
@@ -183,18 +224,25 @@ Try these natural language questions:
 text-to-sql-agent/
 ├── src/
 │   ├── agent.py              # Main agent logic
+│   ├── enhanced_agent.py     # 🆕 Enhanced AI agent with KB integration
+│   ├── knowledge_base.py     # 🆕 Knowledge base management
 │   ├── database.py           # Athena integration
 │   ├── schema.py             # Glue Catalog integration
-│   ├── query_validator.py   # SQL validation
+│   ├── query_validator.py    # SQL validation
 │   ├── query_cache.py        # Result caching
 │   └── conversation.py       # History management
+├── .streamlit/
+│   └── config.toml           # 🆕 Clean UI configuration
 ├── lambda/
 │   └── handler.py            # AWS Lambda handler
 ├── config/
 │   └── cloudformation-template.yaml
-├── web_ui.py                 # Streamlit web interface
+├── web_ui.py                 # Standard web interface
+├── web_ui_enhanced.py        # 🆕 Enhanced web UI with authentication
+├── business_glossary.md      # 🆕 Business context and terminology
 ├── example_enhanced.py       # Usage examples
 ├── requirements.txt          # Python dependencies
+├── requirements-web.txt      # 🆕 Web UI specific dependencies
 └── README.md                 # This file
 ```
 
@@ -220,6 +268,23 @@ ATHENA_WORKGROUP=primary
 
 ## 🚢 Deployment
 
+### 🌟 Enhanced Web UI (Production Ready)
+
+The enhanced web UI is ready for public deployment with built-in authentication:
+
+```bash
+# Install web dependencies
+pip install -r requirements-web.txt
+
+# Launch enhanced UI
+streamlit run web_ui_enhanced.py
+```
+
+**Demo Accounts:**
+- **Admin**: `admin` / `admin123`
+- **Demo User**: `demo` / `demo123`
+- **Analyst**: `analyst` / `analyst123`
+
 ### AWS Lambda
 
 ```bash
@@ -233,6 +298,12 @@ sam deploy --guided
 docker build -t text-to-sql-agent .
 docker run -p 8501:8501 text-to-sql-agent
 ```
+
+### 🔐 Security Features (NEW!)
+- ✅ **Authentication Required** - No access without login
+- ✅ **Session Management** - Secure session handling
+- ✅ **Clean UI** - No development artifacts visible
+- ✅ **Production Ready** - Suitable for public deployment
 
 ## 🤝 Contributing
 
