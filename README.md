@@ -21,6 +21,13 @@ An intelligent AI agent that converts natural language questions into SQL querie
 - 💬 **Conversation History** - Context-aware follow-up questions
 - 📈 **Data Visualization** - Auto-generated charts and graphs
 
+### 🧠 Knowledge Base Integration (NEW!)
+- 📚 **Business Context** - Domain-specific knowledge and terminology
+- 🎯 **Smart Suggestions** - Intelligent query recommendations
+- 📋 **Business Rules** - Automated compliance and validation
+- 🔍 **Query Patterns** - Best practices and common SQL patterns
+- 💡 **Intent Analysis** - Understand query complexity and requirements
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -64,23 +71,34 @@ python setup_glue_sample.py
 
 #### Web UI (Recommended)
 ```bash
+# Standard Web UI
 streamlit run web_ui.py
+
+# Enhanced Web UI with Knowledge Base
+streamlit run web_ui_enhanced.py
 ```
 
 #### Python API
 ```python
+# Standard Agent
 from src.agent import TextToSQLAgent
 
 agent = TextToSQLAgent()
+result = agent.query("Show me all customers from Texas", execute=True)
 
-# Generate and execute SQL
+# Enhanced Agent with Knowledge Base
+from src.enhanced_agent import EnhancedTextToSQLAgent
+
+agent = EnhancedTextToSQLAgent(enable_knowledge_base=True)
 result = agent.query(
-    "Show me all customers from Texas",
+    "Show me premium customers from Texas",
     execute=True,
+    use_knowledge_base=True,
     explain=True
 )
 
 print(f"SQL: {result['sql_query']}")
+print(f"Business Context: {result['knowledge_base_insights']}")
 print(f"Results: {result['results']}")
 ```
 
@@ -93,6 +111,7 @@ python example_enhanced.py
 
 - [Getting Started Guide](GETTING_STARTED_ENHANCED.md)
 - [Enhanced Features](ENHANCED_FEATURES.md)
+- [Knowledge Base Guide](KNOWLEDGE_BASE_GUIDE.md) 🆕
 - [Sample Data Guide](SAMPLE_DATA_GUIDE.md)
 - [IAM Permissions](IAM_PERMISSIONS.md)
 - [Windows Setup](WINDOWS_SETUP.md)
