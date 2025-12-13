@@ -185,6 +185,24 @@ class ConversationHistory:
             'last_activity': self.messages[-1]['timestamp'] if self.messages else None
         }
     
+    def get_recent_queries(self, limit: int = 5) -> List[str]:
+        """
+        Get recent user queries from conversation history.
+        
+        Args:
+            limit: Maximum number of queries to return
+            
+        Returns:
+            List of recent user queries
+        """
+        queries = []
+        for msg in reversed(self.messages):
+            if msg['role'] == 'user' and msg['content']:
+                queries.append(msg['content'])
+                if len(queries) >= limit:
+                    break
+        return list(reversed(queries))
+    
     def clear(self):
         """Clear conversation history."""
         self.messages = []

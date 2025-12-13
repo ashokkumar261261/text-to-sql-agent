@@ -1,0 +1,11 @@
+{
+  "name": "text-to-sql-kb-simple",
+  "description": "Simple Knowledge base for Text-to-SQL Agent",
+  "roleArn": "arn:aws:iam::189796657651:role/BedrockKnowledgeBaseRole",
+  "knowledgeBaseConfiguration": {
+    "type": "VECTOR",
+    "vectorKnowledgeBaseConfiguration": {
+      "embeddingModelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1"
+    }
+  }
+}
