@@ -1,0 +1,23 @@
+# AWS App Runner configuration for Text-to-SQL Agent
+version: 1.0
+runtime: docker
+build:
+  commands:
+    build:
+      - echo "Building Text-to-SQL Agent Web UI"
+      - echo "Build completed"
+run:
+  runtime-version: latest
+  command: streamlit run web_ui_enhanced.py --server.port=8501 --server.address=0.0.0.0 --server.headless=true
+  network:
+    port: 8501
+    env: PORT
+  env:
+    - name: PORT
+      value: "8501"
+    - name: STREAMLIT_SERVER_HEADLESS
+      value: "true"
+    - name: STREAMLIT_SERVER_ENABLE_CORS
+      value: "false"
+    - name: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+      value: "false"
