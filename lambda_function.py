@@ -50,6 +50,16 @@ def lambda_handler(event, context):
                             results, row_count = execute_athena_query(athena_client, sql_query, glue_database, athena_output)
                             database = glue_database
                             print(f"Athena execution successful: {row_count} rows returned")
+                            
+                            # Additional debugging
+                            if row_count == 0:
+                                print("WARNING: Athena query succeeded but returned 0 rows")
+                                print(f"SQL Query was: {sql_query}")
+                                print(f"Database: {glue_database}")
+                            else:
+                                print(f"SUCCESS: Got {row_count} rows from Athena")
+                                print(f"First row sample: {results[0] if results else 'No results'}")
+                                
                         except Exception as athena_error:
                             athena_error_msg = str(athena_error)
                             print(f"Athena execution failed: {athena_error_msg}")
@@ -77,14 +87,23 @@ def lambda_handler(event, context):
                         response_data['athena_error'] = athena_error_msg
                         response_data['error_details'] = f"Athena Query Execution Failed: {athena_error_msg}"
                         response_data['columns'] = []
+                        response_data['success'] = True  # Still show the SQL that was generated
                         # Don't provide sample data when there's an actual error
                     elif results and len(results) > 0:
-                        # Successful Athena execution
+                        # Successful Athena execution with data
                         response_data['columns'] = list(results[0].keys())
-                    elif athena_configured:
-                        # Athena configured but no results (empty result set)
+                        print(f"SUCCESS: Returning {len(results)} rows with columns: {response_data['columns']}")
+                    elif athena_configured and row_count == 0:
+                        # Athena configured and query succeeded but no results (empty result set)
                         response_data['columns'] = []
-                        response_data['message'] = "Query executed successfully but returned no results"
+                        response_data['message'] = "Query executed successfully but returned no results. This could mean:"
+                        response_data['suggestions'] = [
+                            "The query conditions don't match any data in the database",
+                            "The table might be empty or the date range might be outside available data",
+                            "Check if the table and column names are correct",
+                            f"Verify data exists in database '{database}'"
+                        ]
+                        print(f"EMPTY RESULT: Query succeeded but returned 0 rows")
                     else:
                         # Athena not configured - provide sample data
                         response_data['columns'] = []
@@ -92,6 +111,7 @@ def lambda_handler(event, context):
                         response_data['columns'] = list(response_data['results'][0].keys()) if response_data['results'] else []
                         response_data['row_count'] = len(response_data['results'])
                         response_data['sample_data'] = True
+                        print(f"DEMO MODE: Returning {len(response_data['results'])} sample rows")
                     
                     return {
                         'statusCode': 200,
@@ -555,6 +575,7 @@ def lambda_handler(event, context):
                                 <li>Verify table names and column names in the query</li>
                                 <li>Ensure proper IAM permissions for Athena and S3</li>
                                 <li>Check if the Athena output location is configured correctly</li>
+                                <li>Verify that data exists in the tables being queried</li>
                             </ul>
                         </div>`;
                         resultsCount.innerHTML = '❌ Query execution failed';
@@ -591,12 +612,40 @@ def lambda_handler(event, context):
                         if (data.sample_data) {
                             resultsCount.innerHTML += ' (Sample Data - Athena not configured)';
                         }
-                    } else if (!data.athena_error) {
+                    } 
+                    // Handle empty results with suggestions
+                    else if (data.message && data.suggestions) {
+                        let suggestionsHTML = '<ul>';
+                        data.suggestions.forEach(suggestion => {
+                            suggestionsHTML += `<li>${suggestion}</li>`;
+                        });
+                        suggestionsHTML += '</ul>';
+                        
+                        resultsTable.innerHTML = `<div class="system-info">
+                            <h4>ℹ️ ${data.message}</h4>
+                            <p><strong>Possible reasons:</strong></p>
+                            ${suggestionsHTML}
+                            <p><strong>SQL Query executed:</strong> <code>${data.sql}</code></p>
+                            <p><strong>Database:</strong> ${data.database}</p>
+                        </div>`;
+                        resultsCount.innerHTML = '📊 0 results (query succeeded)';
+                    }
+                    else if (!data.athena_error) {
                         // Only show "no results" if there's no Athena error
                         if (data.message) {
-                            resultsTable.innerHTML = `<div class="no-results">${data.message}</div>`;
+                            resultsTable.innerHTML = `<div class="no-results">
+                                ${data.message}
+                                <br><br>
+                                <strong>SQL Query:</strong> <code>${data.sql}</code>
+                                <br><strong>Database:</strong> ${data.database}
+                            </div>`;
                         } else {
-                            resultsTable.innerHTML = '<div class="no-results">Query executed successfully but returned no results</div>';
+                            resultsTable.innerHTML = `<div class="no-results">
+                                Query executed successfully but returned no results
+                                <br><br>
+                                <strong>SQL Query:</strong> <code>${data.sql}</code>
+                                <br><strong>Database:</strong> ${data.database}
+                            </div>`;
                         }
                         resultsCount.innerHTML = '📊 0 results';
                     }
@@ -973,8 +1022,8 @@ def execute_athena_query(athena_client, sql_query, database, output_location):
             wait_time += poll_interval
         
         if wait_time >= max_wait:
-            print("Query timeout - returning empty results")
-            return [], 0
+            print("Query timeout - raising exception")
+            raise Exception(f"Query execution timeout after {max_wait} seconds")
         
         # Get results
         print("Fetching query results...")
@@ -983,44 +1032,75 @@ def execute_athena_query(athena_client, sql_query, database, output_location):
             MaxResults=100  # Limit to 100 rows
         )
         
-        print(f"Raw Athena response: {results}")
+        print(f"Raw Athena response keys: {results.keys()}")
         
         # Parse results
-        if 'ResultSet' not in results or 'Rows' not in results['ResultSet']:
-            print("No results found in response")
-            return [], 0
+        if 'ResultSet' not in results:
+            print("ERROR: No ResultSet in response")
+            raise Exception("No ResultSet in Athena response")
+            
+        if 'Rows' not in results['ResultSet']:
+            print("ERROR: No Rows in ResultSet")
+            raise Exception("No Rows in Athena ResultSet")
         
         rows_data = results['ResultSet']['Rows']
         print(f"Total rows in response: {len(rows_data)}")
         
         if len(rows_data) <= 1:  # Only header or no data
-            print("No data rows found (only header or empty)")
+            print("Query returned no data rows (only header or empty)")
             return [], 0
         
-        # Extract column names from header
-        columns = [col['Label'] for col in results['ResultSet']['ResultSetMetadata']['ColumnInfo']]
-        print(f"Columns: {columns}")
+        # Extract column names from header row (first row)
+        header_row = rows_data[0]
+        columns = []
+        if 'Data' in header_row:
+            columns = [col.get('VarCharValue', f'col_{i}') for i, col in enumerate(header_row['Data'])]
+        else:
+            # Fallback to metadata
+            columns = [col['Label'] for col in results['ResultSet']['ResultSetMetadata']['ColumnInfo']]
         
-        # Parse data rows
+        print(f"Columns extracted: {columns}")
+        
+        # Parse data rows (skip header)
         rows = []
-        for idx, row in enumerate(rows_data[1:]):  # Skip header row
+        for idx, row in enumerate(rows_data[1:]):
             print(f"Processing row {idx + 1}: {row}")
             if 'Data' not in row:
-                print(f"Row {idx + 1} has no Data field")
+                print(f"WARNING: Row {idx + 1} has no Data field, skipping")
                 continue
+                
             row_data = {}
             for i, col in enumerate(columns):
                 if i < len(row['Data']):
-                    value = row['Data'][i].get('VarCharValue', '')
+                    # Get value, handle different data types
+                    cell = row['Data'][i]
+                    value = cell.get('VarCharValue', '')
+                    
+                    # Try to convert numeric values
+                    if value and value.replace('.', '').replace('-', '').isdigit():
+                        try:
+                            if '.' in value:
+                                value = float(value)
+                            else:
+                                value = int(value)
+                        except:
+                            pass  # Keep as string if conversion fails
+                    
                     row_data[col] = value
-                    print(f"  {col}: {value}")
+                    print(f"  {col}: {value} (type: {type(value).__name__})")
                 else:
                     row_data[col] = ''
                     print(f"  {col}: (empty)")
-            rows.append(row_data)
+            
+            if row_data:  # Only add non-empty rows
+                rows.append(row_data)
         
         print(f"Successfully parsed {len(rows)} rows")
-        print(f"Final rows data: {rows}")
+        print(f"Sample row data: {rows[0] if rows else 'No rows'}")
+        
+        if len(rows) == 0:
+            print("WARNING: No data rows were parsed successfully")
+            
         return rows, len(rows)
         
     except Exception as e:
@@ -1028,8 +1108,8 @@ def execute_athena_query(athena_client, sql_query, database, output_location):
         print(f"Athena execution error: {error_msg}")
         import traceback
         traceback.print_exc()
-        # Return empty results instead of failing
-        return [], 0
+        # Re-raise the exception so it can be handled properly
+        raise Exception(f"Athena query execution failed: {error_msg}")
 
 
 def generate_sample_data(query):
