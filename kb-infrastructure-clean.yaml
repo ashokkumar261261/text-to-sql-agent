@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Clean Knowledge Base for Text-to-SQL with simple patterns'
+
+Parameters:
+  S3BucketName:
+    Type: String
+    Default: 'text-to-sql-kb-demo-2024'
+    Description: 'S3 bucket containing clean KB documents'
+
+Resources:
+  # OpenSearch Serverless Collection (reuse existing)
+  KnowledgeBase:
+    Type: AWS::BedrockAgent::KnowledgeBase
+    Properties:
+      Name: 'text-to-sql-kb-clean'
+      Description: 'Clean Knowledge Base with simple working patterns only'
+      RoleArn: 'arn:aws:iam::189796657651:role/BedrockKnowledgeBaseRole'
+      KnowledgeBaseConfiguration:
+        Type: 'VECTOR'
+        VectorKnowledgeBaseConfiguration:
+          EmbeddingModelArn: 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'
+      StorageConfiguration:
+        Type: 'OPENSEARCH_SERVERLESS'
+        OpensearchServerlessConfiguration:
+          CollectionArn: 'arn:aws:aoss:us-east-1:189796657651:collection/e9ex0v2xiya5ccb91445'
+          VectorIndexName: 'bedrock-kb-clean-vector-index'
+          FieldMapping:
+            VectorField: 'bedrock-kb-clean-vector'
+            TextField: 'AMAZON_BEDROCK_TEXT_CHUNK'
+            MetadataField: 'AMAZON_BEDROCK_METADATA'
+
+  DataSource:
+    Type: AWS::BedrockAgent::DataSource
+    Properties:
+      KnowledgeBaseId: !Ref KnowledgeBase
+      Name: 'text-to-sql-s3-clean-source'
+      Description: 'S3 data source with clean simple patterns'
+      DataSourceConfiguration:
+        Type: 'S3'
+        S3Configuration:
+          BucketArn: !Sub 'arn:aws:s3:::${S3BucketName}'
+
+Outputs:
+  KnowledgeBaseId:
+    Description: 'Knowledge Base ID'
+    Value: !Ref KnowledgeBase
+    Export:
+      Name: 'TextToSQLCleanKnowledgeBaseId'
+  
+  DataSourceId:
+    Description: 'Data Source ID'
+    Value: !Ref DataSource
+    Export:
+      Name: 'TextToSQLCleanDataSourceId'
