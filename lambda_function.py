@@ -1569,25 +1569,25 @@ def get_knowledge_base_context(bedrock_agent, query):
                 content = result.get('content', {}).get('text', '')
                 score = result.get('score', 0)
                 
-                if content and score > 0.1:  # Use very low threshold for any results
+                if content and score > 0.5:  # Increased threshold for higher quality results
                     # Add to full context for LLM
                     full_context_parts.append(content)
                     
                     # Add summary for insights
                     summary = content[:150] + '...' if len(content) > 150 else content
                     context['insights'].append(f"[Relevance: {score:.2f}] {summary}")
-                elif content:  # Include even low-confidence results
+                elif content and score > 0.3:  # Include medium confidence results
                     full_context_parts.append(content)
                     summary = content[:100] + '...' if len(content) > 100 else content
-                    context['insights'].append(f"[Low confidence: {score:.2f}] {summary}")
+                    context['insights'].append(f"[Medium confidence: {score:.2f}] {summary}")
             
             if full_context_parts:
                 context['full_context'] = '\n\n'.join(full_context_parts)
-                context['explanation'] = f"Enhanced with {len(full_context_parts)} relevant insights from Knowledge Base (confidence > 0.3)."
+                context['explanation'] = f"Enhanced with {len(full_context_parts)} relevant insights from Knowledge Base (confidence > 0.5)."
                 print(f"Knowledge Base context length: {len(context['full_context'])} characters")
             else:
                 context['used'] = False
-                context['explanation'] = 'No matches found in Knowledge Base above confidence threshold.'
+                context['explanation'] = 'No high-confidence matches found in Knowledge Base (threshold: 0.5).'
         
         return context
         
@@ -1616,7 +1616,9 @@ def generate_enhanced_sql_with_bedrock(bedrock_runtime, query, kb_context):
 BUSINESS CONTEXT FROM KNOWLEDGE BASE:
 {kb_context['full_context']}
 
-Use this business context, schema information, and examples to generate accurate SQL queries.
+CRITICAL: The above Knowledge Base contains EXACT SQL patterns for this type of query. 
+Use the provided SQL examples as templates and adapt them to the specific question.
+DO NOT generate simple queries when complex business intelligence patterns are available.
 """
     else:
         # Provide essential business context when KB is not available
@@ -1681,10 +1683,9 @@ SQL GENERATION RULES:
 8. Handle NULL values appropriately
 9. Use meaningful column aliases for calculated fields
 
-COMMON QUERY PATTERNS:
-- "Top customers by revenue": SELECT c.name, c.email, SUM(o.total_amount) as total_revenue FROM {database_name}.customers c JOIN {database_name}.orders o ON c.customer_id = o.customer_id GROUP BY c.customer_id, c.name, c.email ORDER BY total_revenue DESC LIMIT 5;
-- "Trending products": SELECT product_name, category, COUNT(order_id) as order_count FROM {database_name}.orders GROUP BY product_name, category ORDER BY order_count DESC LIMIT 10;
-- "Sales by category": SELECT category, COUNT(order_id) as total_orders, SUM(total_amount) as total_revenue FROM {database_name}.orders GROUP BY category ORDER BY total_revenue DESC;
+IMPORTANT: If the Knowledge Base contains specific SQL patterns for this query type, 
+USE THOSE PATTERNS as your template. Do not generate oversimplified queries when 
+sophisticated business intelligence patterns are available in the Knowledge Base.
 
 Natural Language Query: {query}
 

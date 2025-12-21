@@ -6,6 +6,67 @@
 - **Key Join**: customers.customer_id = orders.customer_id
 - **Key Join**: products.product_name = orders.product_name
 
+## PRIORITY BUSINESS INTELLIGENCE QUERIES
+
+### Regional Sales Performance Analysis
+```sql
+-- EXACT PATTERN for "Compare sales performance by region"
+SELECT c.state, c.country,
+       COUNT(DISTINCT c.customer_id) as total_customers,
+       COUNT(DISTINCT CASE WHEN o.order_date >= CURRENT_DATE - INTERVAL '30' DAY THEN c.customer_id END) as active_customers_30d,
+       COUNT(o.order_id) as total_orders,
+       SUM(o.total_amount) as total_revenue,
+       AVG(o.total_amount) as avg_order_value,
+       SUM(o.quantity) as total_units_sold,
+       ROUND(SUM(o.total_amount) / COUNT(DISTINCT c.customer_id), 2) as revenue_per_customer,
+       ROUND(COUNT(o.order_id) * 1.0 / COUNT(DISTINCT c.customer_id), 2) as orders_per_customer,
+       RANK() OVER (ORDER BY SUM(o.total_amount) DESC) as revenue_rank
+FROM text_to_sql_demo.customers c
+LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
+GROUP BY c.state, c.country
+HAVING total_customers >= 2
+ORDER BY total_revenue DESC;
+```
+
+### Customer Churn Risk Analysis
+```sql
+-- EXACT PATTERN for "Find customers at risk of churning"
+SELECT c.name, c.email, c.city, c.registration_date,
+       COUNT(o.order_id) as total_orders,
+       SUM(o.total_amount) as lifetime_value,
+       MAX(o.order_date) as last_order_date,
+       DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order,
+       CASE 
+           WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered'
+           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 180 THEN 'High Risk'
+           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 90 THEN 'Medium Risk'
+           ELSE 'Low Risk'
+       END as churn_risk_level
+FROM text_to_sql_demo.customers c
+LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
+HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
+ORDER BY lifetime_value DESC;
+```
+
+### Product Profit Margin Analysis
+```sql
+-- EXACT PATTERN for "Which products have the highest profit margins"
+SELECT p.product_name, p.category, p.price as current_price,
+       COUNT(o.order_id) as total_orders,
+       SUM(o.quantity) as total_units_sold,
+       SUM(o.total_amount) as total_revenue,
+       ROUND(p.price * 0.4, 2) as estimated_profit_per_unit,
+       ROUND((p.price * 0.4) / p.price * 100, 2) as estimated_margin_percentage,
+       ROUND(SUM(o.quantity) * p.price * 0.4, 2) as estimated_total_profit
+FROM text_to_sql_demo.products p
+LEFT JOIN text_to_sql_demo.orders o ON p.product_name = o.product_name
+GROUP BY p.product_id, p.product_name, p.category, p.price
+HAVING total_orders > 0
+ORDER BY estimated_margin_percentage DESC, total_revenue DESC
+LIMIT 15;
+```
+
 ## Basic Query Examples
 
 ### Simple Selection Queries
