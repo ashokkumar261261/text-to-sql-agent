@@ -119,3 +119,10 @@ ORDER BY total_revenue DESC;
 6. **Performance**: Always include LIMIT clause for large result sets
 7. **Column aliases**: Use meaningful aliases for calculated fields (e.g., `total_revenue`, `order_count`)
 8. **NULL handling**: Consider NULL values in joins and calculations
+
+## CRITICAL ATHENA RULES - MUST FOLLOW:
+1. **NEVER use column aliases in HAVING clauses** - Athena doesn't support this
+2. **NEVER use CASE expressions in HAVING clauses** - Use WHERE or subqueries instead
+3. **Keep queries simple** - Avoid complex nested CASE statements in GROUP BY/HAVING
+4. **Use date_diff('day', date1, date2)** - Not DATEDIFF
+5. **For revenue queries, use simple SUM and ORDER BY** - Don't add complex filtering
