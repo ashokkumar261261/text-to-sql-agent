@@ -5,111 +5,95 @@
 
 | Column Name | Data Type | Description | Constraints |
 |-------------|-----------|-------------|-------------|
-| customer_id | INTEGER | Unique identifier for each customer | PRIMARY KEY, NOT NULL |
-| customer_name | VARCHAR(255) | Full name of the customer | NOT NULL |
-| email | VARCHAR(255) | Customer's email address | UNIQUE, NOT NULL |
-| phone | VARCHAR(20) | Customer's phone number | |
-| address | TEXT | Customer's physical address | |
+| customer_id | BIGINT | Unique identifier for each customer | PRIMARY KEY, NOT NULL |
+| name | STRING | Full name of the customer | NOT NULL |
+| email | STRING | Customer's email address | UNIQUE, NOT NULL |
+| city | STRING | Customer's city | |
+| state | STRING | Customer's state | |
 | signup_date | DATE | Date when customer registered | NOT NULL |
-| status | VARCHAR(20) | Customer status (active, inactive) | DEFAULT 'active' |
 
 **Sample Data**:
 ```
-customer_id: 1, customer_name: "John Smith", email: "john@email.com", signup_date: "2023-01-15"
-customer_id: 2, customer_name: "Jane Doe", email: "jane@email.com", signup_date: "2023-02-20"
-```
-
-## Table: products
-**Description**: Contains information about all products available for sale
-
-| Column Name | Data Type | Description | Constraints |
-|-------------|-----------|-------------|-------------|
-| product_id | INTEGER | Unique identifier for each product | PRIMARY KEY, NOT NULL |
-| product_name | VARCHAR(255) | Name of the product | NOT NULL |
-| description | TEXT | Detailed product description | |
-| category | VARCHAR(100) | Product category | NOT NULL |
-| price | DECIMAL(10,2) | Current selling price | NOT NULL, CHECK (price >= 0) |
-| cost | DECIMAL(10,2) | Cost to produce/acquire the product | CHECK (cost >= 0) |
-| status | VARCHAR(20) | Product status (active, discontinued) | DEFAULT 'active' |
-
-**Sample Data**:
-```
-product_id: 1, product_name: "Laptop Pro", category: "Electronics", price: 1299.99, cost: 800.00
-product_id: 2, product_name: "Wireless Mouse", category: "Electronics", price: 29.99, cost: 15.00
+customer_id: 1, name: "John Smith", email: "john@email.com", city: "New York", signup_date: "2023-01-15"
+customer_id: 2, name: "Jane Doe", email: "jane@email.com", city: "Los Angeles", signup_date: "2023-02-20"
 ```
 
 ## Table: orders
-**Description**: Contains information about customer orders
+**Description**: Contains information about customer orders (denormalized with product info)
 
 | Column Name | Data Type | Description | Constraints |
 |-------------|-----------|-------------|-------------|
-| order_id | INTEGER | Unique identifier for each order | PRIMARY KEY, NOT NULL |
-| customer_id | INTEGER | Reference to customer who placed the order | FOREIGN KEY REFERENCES customers(customer_id) |
-| order_date | DATE | Date when the order was placed | NOT NULL |
+| order_id | BIGINT | Unique identifier for each order | PRIMARY KEY, NOT NULL |
+| customer_id | BIGINT | Reference to customer who placed the order | FOREIGN KEY REFERENCES customers(customer_id) |
+| product_name | STRING | Name of the product ordered | NOT NULL |
+| category | STRING | Product category | NOT NULL |
+| quantity | INT | Number of units ordered | NOT NULL, CHECK (quantity > 0) |
+| price | DECIMAL(10,2) | Unit price at time of order | NOT NULL, CHECK (price >= 0) |
 | total_amount | DECIMAL(10,2) | Total value of the order | NOT NULL, CHECK (total_amount >= 0) |
-| status | VARCHAR(20) | Order status (pending, shipped, delivered, cancelled) | DEFAULT 'pending' |
-| shipping_address | TEXT | Address where order should be delivered | |
-| payment_method | VARCHAR(50) | Method used for payment | |
+| order_date | DATE | Date when the order was placed | NOT NULL |
+| status | STRING | Order status (pending, shipped, delivered, cancelled) | DEFAULT 'pending' |
 
 **Sample Data**:
 ```
-order_id: 1001, customer_id: 1, order_date: "2023-03-15", total_amount: 1329.98, status: "delivered"
-order_id: 1002, customer_id: 2, order_date: "2023-03-20", total_amount: 59.98, status: "shipped"
+order_id: 1001, customer_id: 1, product_name: "Laptop Pro", category: "Electronics", 
+quantity: 1, price: 1299.99, total_amount: 1299.99, order_date: "2023-03-15", status: "delivered"
 ```
 
-## Table: order_items
-**Description**: Contains details about individual items within each order
+## IMPORTANT: Athena-Specific Limitations
 
-| Column Name | Data Type | Description | Constraints |
-|-------------|-----------|-------------|-------------|
-| order_item_id | INTEGER | Unique identifier for each order item | PRIMARY KEY, NOT NULL |
-| order_id | INTEGER | Reference to the order | FOREIGN KEY REFERENCES orders(order_id) |
-| product_id | INTEGER | Reference to the product | FOREIGN KEY REFERENCES products(product_id) |
-| quantity | INTEGER | Number of units ordered | NOT NULL, CHECK (quantity > 0) |
-| unit_price | DECIMAL(10,2) | Price per unit at time of order | NOT NULL, CHECK (unit_price >= 0) |
-| line_total | DECIMAL(10,2) | Total for this line item (quantity * unit_price) | NOT NULL |
+### 1. HAVING Clause Restrictions
+- **CANNOT** use column aliases in HAVING clause
+- **CANNOT** use CASE expressions in HAVING clause
+- Use subqueries instead when needed
 
-**Sample Data**:
-```
-order_item_id: 1, order_id: 1001, product_id: 1, quantity: 1, unit_price: 1299.99, line_total: 1299.99
-order_item_id: 2, order_id: 1001, product_id: 2, quantity: 1, unit_price: 29.99, line_total: 29.99
-```
+### 2. Column References
+- Use actual column names: `name` (not `customer_name`)
+- Always qualify columns with table aliases: `c.name`, `o.total_amount`
 
-## Table: sales_reps
-**Description**: Contains information about sales representatives
+### 3. NULL Handling
+- Use `NULLS LAST` or `NULLS FIRST` in ORDER BY for consistent results
+- Use `IS NULL` checks for LEFT JOIN scenarios
 
-| Column Name | Data Type | Description | Constraints |
-|-------------|-----------|-------------|-------------|
-| rep_id | INTEGER | Unique identifier for each sales rep | PRIMARY KEY, NOT NULL |
-| rep_name | VARCHAR(255) | Full name of the sales representative | NOT NULL |
-| email | VARCHAR(255) | Sales rep's email address | UNIQUE, NOT NULL |
-| territory | VARCHAR(100) | Geographic territory assigned | |
-| hire_date | DATE | Date when rep was hired | NOT NULL |
-| quota | DECIMAL(10,2) | Monthly sales quota | CHECK (quota >= 0) |
-| commission_rate | DECIMAL(5,4) | Commission rate (as decimal, e.g., 0.05 for 5%) | CHECK (commission_rate >= 0 AND commission_rate <= 1) |
+## Common Query Patterns
 
-**Sample Data**:
-```
-rep_id: 1, rep_name: "Alice Johnson", territory: "North", quota: 50000.00, commission_rate: 0.05
-rep_id: 2, rep_name: "Bob Wilson", territory: "South", quota: 45000.00, commission_rate: 0.04
+### Top Customers by Revenue (CORRECT)
+```sql
+SELECT 
+    c.name,
+    c.email,
+    c.city,
+    COUNT(o.order_id) as total_orders,
+    SUM(o.total_amount) as total_revenue
+FROM text_to_sql_demo.customers c
+LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
+WHERE o.status = 'delivered' OR o.status IS NULL
+GROUP BY c.customer_id, c.name, c.email, c.city
+ORDER BY total_revenue DESC NULLS LAST
+LIMIT 5;
 ```
 
-## Table: sales
-**Description**: Contains sales transaction records
-
-| Column Name | Data Type | Description | Constraints |
-|-------------|-----------|-------------|-------------|
-| sale_id | INTEGER | Unique identifier for each sale | PRIMARY KEY, NOT NULL |
-| order_id | INTEGER | Reference to the order | FOREIGN KEY REFERENCES orders(order_id) |
-| rep_id | INTEGER | Reference to sales representative | FOREIGN KEY REFERENCES sales_reps(rep_id) |
-| sale_date | DATE | Date of the sale | NOT NULL |
-| sale_amount | DECIMAL(10,2) | Total amount of the sale | NOT NULL, CHECK (sale_amount >= 0) |
-| commission_amount | DECIMAL(10,2) | Commission earned by rep | CHECK (commission_amount >= 0) |
-
-**Sample Data**:
+### Customer Analysis with Risk Assessment (CORRECT)
+```sql
+SELECT 
+    c.name,
+    c.email,
+    COUNT(o.order_id) as total_orders,
+    SUM(o.total_amount) as lifetime_value,
+    MAX(o.order_date) as last_order_date
+FROM text_to_sql_demo.customers c
+LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.name, c.email
+ORDER BY lifetime_value DESC NULLS LAST;
 ```
-sale_id: 1, order_id: 1001, rep_id: 1, sale_date: "2023-03-15", sale_amount: 1329.98, commission_amount: 66.50
-sale_id: 2, order_id: 1002, rep_id: 2, sale_date: "2023-03-20", sale_amount: 59.98, commission_amount: 2.40
+
+### AVOID: Complex HAVING with Aliases (INCORRECT)
+```sql
+-- THIS WILL FAIL IN ATHENA
+SELECT c.name, 
+       CASE WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered' END as risk
+FROM customers c LEFT JOIN orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.name
+HAVING risk = 'Never Ordered';  -- ERROR: Cannot use alias in HAVING
 ```
 
 ## Relationships and Foreign Keys

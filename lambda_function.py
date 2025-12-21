@@ -1636,80 +1636,28 @@ ESSENTIAL BUSINESS CONTEXT:
 
 DATABASE: {database_name}
 
-COMPLETE DATABASE SCHEMA:
-Table: customers
-- customer_id (bigint) - Primary Key
-- name (string) - Customer full name  
-- email (string) - Customer email
-- phone (string) - Customer phone
-- city (string) - Customer city
-- state (string) - Customer state
-- country (string) - Customer country
-
-Table: orders  
-- order_id (bigint) - Primary Key
-- customer_id (bigint) - Foreign key to customers.customer_id
-- product_name (string) - Product name (NOT product_id)
-- category (string) - Product category
-- quantity (int) - Quantity ordered
-- price (decimal(10,2)) - Unit price
-- total_amount (decimal(10,2)) - Total order amount
-- order_date (date) - Order date
-- status (string) - Order status
-
-Table: products
-- product_id (bigint) - Primary Key  
-- product_name (string) - Product name
-- category (string) - Product category
-- price (decimal(10,2)) - Product price
-- stock (int) - Stock quantity
-- supplier (string) - Supplier name
-
-CRITICAL JOIN RULES:
-- customers ↔ orders: JOIN ON customers.customer_id = orders.customer_id
-- products ↔ orders: JOIN ON products.product_name = orders.product_name (NOT product_id!)
-
 {kb_context_text}
 
-ATHENA-SPECIFIC FUNCTIONS (MANDATORY):
-- For date differences: Use date_diff('day', start_date, end_date) NOT DATEDIFF()
-- For current date: Use CURRENT_DATE
-- For date intervals: Use INTERVAL '30' DAY
-- For date extraction: Use EXTRACT(YEAR FROM date_column)
+ATHENA-SPECIFIC LIMITATIONS (CRITICAL):
+1. CANNOT use column aliases in HAVING clause
+2. CANNOT use CASE expressions in HAVING clause  
+3. Use subqueries instead when filtering on calculated columns
+4. For date differences: Use date_diff('day', start_date, end_date)
+5. For current date: Use CURRENT_DATE
+6. Status values are case-sensitive: 'Delivered', 'Shipped', 'Processing'
 
 SQL GENERATION RULES:
 1. ALWAYS prefix tables: {database_name}.table_name
-2. Use exact column names from schema above
-3. For trending/popular products: Use orders table, GROUP BY product_name, ORDER BY COUNT(order_id) DESC
-4. For customer revenue: JOIN customers + orders, SUM(total_amount)
-5. For product joins: Use product_name (string) NOT product_id
-6. Always include LIMIT for large results (default LIMIT 10)
-7. Use proper aggregation with GROUP BY
-8. Handle NULL values appropriately
-9. Use meaningful column aliases for calculated fields
+2. Use exact column names from the Knowledge Base schema
+3. For customer revenue: JOIN customers + orders, SUM(total_amount)
+4. Always include LIMIT for large results (default LIMIT 5 for top queries)
+5. Use proper aggregation with GROUP BY - INCLUDE ALL non-aggregate columns in GROUP BY
+6. Handle NULL values with NULLS LAST in ORDER BY
+7. Use meaningful column aliases for calculated fields
+8. Keep queries simple and avoid complex HAVING clauses
+9. CRITICAL: When using GROUP BY, ALL non-aggregate columns in SELECT must be in GROUP BY clause
 
-MANDATORY INSTRUCTION FOR QUERY: "{query}"
-
-If this query is about customer churn or risk analysis, you MUST use this EXACT pattern:
-SELECT c.name, c.email, c.city,
-       COUNT(o.order_id) as total_orders,
-       SUM(o.total_amount) as lifetime_value,
-       MAX(o.order_date) as last_order_date,
-       date_diff('day', MAX(o.order_date), CURRENT_DATE) as days_since_last_order,
-       CASE 
-           WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered'
-           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 180 THEN 'High Risk'
-           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 90 THEN 'Medium Risk'
-           ELSE 'Low Risk'
-       END as churn_risk_level
-FROM {database_name}.customers c
-LEFT JOIN {database_name}.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email, c.city
-HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
-ORDER BY lifetime_value DESC
-LIMIT 20;
-
-CRITICAL: Use date_diff('day', start_date, end_date) NOT DATEDIFF() for Athena compatibility.
+QUERY TO CONVERT: "{query}"
 
 Generate ONLY the SQL query. No explanations, markdown formatting, or additional text.
 
