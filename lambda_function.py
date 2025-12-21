@@ -1526,7 +1526,7 @@ def get_knowledge_base_context(bedrock_agent, query):
     
     try:
         # Knowledge Base ID from configuration
-        kb_id = os.environ.get('BEDROCK_KNOWLEDGE_BASE_ID', 'JKGJVVWBDY')
+        kb_id = os.environ.get('BEDROCK_KNOWLEDGE_BASE_ID', 'MJ2GCTRK6Z')
         
         if not kb_id:
             print("Knowledge Base ID not configured")
