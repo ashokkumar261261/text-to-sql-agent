@@ -1716,19 +1716,47 @@ SQL Query:"""
         print(prompt[:500] + "..." if len(prompt) > 500 else prompt)
         print("=== END PROMPT ===")
         
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 1000,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": 0.1
-        })
-        
         print("Calling Bedrock LLM...")
+        
+        # Different API formats for different models
+        if 'claude' in model_id.lower():
+            # Claude API format
+            body = json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 1000,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.1
+            })
+        elif 'titan' in model_id.lower():
+            # Titan API format
+            body = json.dumps({
+                "inputText": prompt,
+                "textGenerationConfig": {
+                    "maxTokenCount": 1000,
+                    "temperature": 0.1,
+                    "topP": 0.9,
+                    "stopSequences": []
+                }
+            })
+        else:
+            # Default to Claude format
+            body = json.dumps({
+                "anthropic_version": "bedrock-2023-05-31",
+                "max_tokens": 1000,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.1
+            })
+        
         response = bedrock_runtime.invoke_model(
             modelId=model_id,
             body=body
@@ -1737,7 +1765,19 @@ SQL Query:"""
         response_body = json.loads(response['body'].read())
         print(f"LLM Response: {response_body}")
         
-        sql_query = response_body['content'][0]['text'].strip()
+        # Extract SQL query based on model type
+        if 'claude' in model_id.lower():
+            sql_query = response_body['content'][0]['text'].strip()
+        elif 'titan' in model_id.lower():
+            sql_query = response_body['results'][0]['outputText'].strip()
+        else:
+            # Try both formats
+            if 'content' in response_body:
+                sql_query = response_body['content'][0]['text'].strip()
+            elif 'results' in response_body:
+                sql_query = response_body['results'][0]['outputText'].strip()
+            else:
+                raise Exception(f"Unknown response format: {response_body}")
         
         # Clean up the SQL query
         sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
