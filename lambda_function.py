@@ -1683,11 +1683,23 @@ SQL GENERATION RULES:
 8. Handle NULL values appropriately
 9. Use meaningful column aliases for calculated fields
 
-IMPORTANT: If the Knowledge Base contains specific SQL patterns for this query type, 
-USE THOSE PATTERNS as your template. Do not generate oversimplified queries when 
-sophisticated business intelligence patterns are available in the Knowledge Base.
+ATHENA-SPECIFIC FUNCTIONS:
+- For date differences: Use date_diff('day', start_date, end_date) NOT DATEDIFF()
+- For current date: Use CURRENT_DATE
+- For date intervals: Use INTERVAL '30' DAY
+- For date extraction: Use EXTRACT(YEAR FROM date_column)
 
-Natural Language Query: {query}
+MANDATORY: If the Knowledge Base above contains SQL examples that match this query type, 
+you MUST use those examples as your template. DO NOT generate simple SELECT * queries 
+when sophisticated business intelligence patterns are provided in the Knowledge Base.
+
+For the query: "{query}"
+
+If this is about:
+- Customer churn/risk: Use complex churn analysis with risk scoring
+- Regional sales comparison: Use comprehensive regional metrics with rankings
+- Product profit margins: Use advanced profitability calculations
+- Any business intelligence query: Use the sophisticated patterns from Knowledge Base
 
 Generate ONLY the SQL query. No explanations, markdown formatting, or additional text.
 
@@ -1697,6 +1709,12 @@ SQL Query:"""
         print(f"Generating SQL with model: {model_id}")
         print(f"Query: {query}")
         print(f"KB Context used: {kb_context.get('used', False)}")
+        print(f"KB Context length: {len(kb_context.get('full_context', ''))}")
+        
+        # Debug: Print the actual prompt being sent
+        print("=== PROMPT BEING SENT TO LLM ===")
+        print(prompt[:500] + "..." if len(prompt) > 500 else prompt)
+        print("=== END PROMPT ===")
         
         body = json.dumps({
             "anthropic_version": "bedrock-2023-05-31",
@@ -1710,12 +1728,15 @@ SQL Query:"""
             "temperature": 0.1
         })
         
+        print("Calling Bedrock LLM...")
         response = bedrock_runtime.invoke_model(
             modelId=model_id,
             body=body
         )
         
         response_body = json.loads(response['body'].read())
+        print(f"LLM Response: {response_body}")
+        
         sql_query = response_body['content'][0]['text'].strip()
         
         # Clean up the SQL query
@@ -1732,6 +1753,15 @@ SQL Query:"""
         sql_query = ' '.join(sql_lines)
         
         print(f"Generated SQL: {sql_query}")
+        
+        # Check if the generated SQL is too simple when KB context is available
+        if (kb_context.get('used') and 
+            sql_query.upper().startswith('SELECT *') and 
+            'LIMIT' in sql_query.upper() and 
+            len(sql_query.split()) < 10):
+            print("WARNING: LLM generated simple query despite KB context available!")
+            print("This suggests the LLM is not properly using the Knowledge Base context.")
+        
         return sql_query
         
     except Exception as e:
@@ -1739,20 +1769,8 @@ SQL Query:"""
         import traceback
         traceback.print_exc()
         
-        # Enhanced fallback based on query content and correct schema
-        query_lower = query.lower()
-        if 'trending' in query_lower and 'product' in query_lower:
-            return f"SELECT product_name, category, COUNT(order_id) as order_count, SUM(quantity) as total_quantity FROM {database_name}.orders GROUP BY product_name, category ORDER BY order_count DESC LIMIT 10;"
-        elif 'top' in query_lower and 'customer' in query_lower and ('revenue' in query_lower or 'sales' in query_lower):
-            return f"SELECT c.name, c.email, SUM(o.total_amount) as total_revenue FROM {database_name}.customers c JOIN {database_name}.orders o ON c.customer_id = o.customer_id GROUP BY c.customer_id, c.name, c.email ORDER BY total_revenue DESC LIMIT 5;"
-        elif 'customer' in query_lower:
-            return f"SELECT * FROM {database_name}.customers LIMIT 10;"
-        elif 'product' in query_lower:
-            return f"SELECT * FROM {database_name}.products LIMIT 10;"
-        elif 'order' in query_lower:
-            return f"SELECT * FROM {database_name}.orders LIMIT 10;"
-        else:
-            return f"SELECT * FROM {database_name}.customers LIMIT 5;"
+        # No fallback - raise the error so user knows LLM failed
+        raise Exception(f"LLM SQL generation failed: {str(e)}. Please check your query and try again.")
 
 
 def execute_athena_query(athena_client, sql_query, database, output_location):

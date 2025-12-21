@@ -35,11 +35,11 @@ SELECT c.name, c.email, c.city, c.registration_date,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        MAX(o.order_date) as last_order_date,
-       DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order,
+       date_diff('day', MAX(o.order_date), CURRENT_DATE) as days_since_last_order,
        CASE 
            WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered'
-           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 180 THEN 'High Risk'
-           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 90 THEN 'Medium Risk'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 180 THEN 'High Risk'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 90 THEN 'Medium Risk'
            ELSE 'Low Risk'
        END as churn_risk_level
 FROM text_to_sql_demo.customers c
@@ -133,16 +133,16 @@ SELECT c.name, c.email, c.city, c.registration_date,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        MAX(o.order_date) as last_order_date,
-       DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order,
+       date_diff('day', MAX(o.order_date), CURRENT_DATE) as days_since_last_order,
        AVG(o.total_amount) as avg_order_value,
        CASE 
            WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered'
-           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 180 THEN 'High Risk'
-           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 90 THEN 'Medium Risk'
-           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 30 THEN 'Low Risk'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 180 THEN 'High Risk'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 90 THEN 'Medium Risk'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 30 THEN 'Low Risk'
            ELSE 'Active'
        END as churn_risk_level,
-       ROUND(COUNT(o.order_id) * 30.0 / GREATEST(DATEDIFF(CURRENT_DATE, c.registration_date), 1), 2) as orders_per_month
+       ROUND(COUNT(o.order_id) * 30.0 / GREATEST(date_diff('day', c.registration_date, CURRENT_DATE), 1), 2) as orders_per_month
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
 GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
