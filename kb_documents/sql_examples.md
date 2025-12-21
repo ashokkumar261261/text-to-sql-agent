@@ -68,13 +68,31 @@ GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
 ORDER BY lifetime_value DESC;
 
 -- Customers at risk of churning (no orders in 90+ days)
-SELECT c.name, c.email, MAX(o.order_date) as last_order_date,
-       DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order
+SELECT c.name, c.email, c.city, c.registration_date,
+       COUNT(o.order_id) as total_orders,
+       SUM(o.total_amount) as lifetime_value,
+       MAX(o.order_date) as last_order_date,
+       DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order,
+       AVG(o.total_amount) as avg_order_value,
+       CASE 
+           WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered'
+           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 180 THEN 'High Risk'
+           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 90 THEN 'Medium Risk'
+           WHEN DATEDIFF(CURRENT_DATE, MAX(o.order_date)) > 30 THEN 'Low Risk'
+           ELSE 'Active'
+       END as churn_risk_level,
+       ROUND(COUNT(o.order_id) * 30.0 / GREATEST(DATEDIFF(CURRENT_DATE, c.registration_date), 1), 2) as orders_per_month
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email
-HAVING days_since_last_order > 90 OR days_since_last_order IS NULL
-ORDER BY days_since_last_order DESC;
+GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
+HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
+ORDER BY 
+    CASE churn_risk_level 
+        WHEN 'Never Ordered' THEN 1
+        WHEN 'High Risk' THEN 2
+        WHEN 'Medium Risk' THEN 3
+    END,
+    lifetime_value DESC;
 ```
 
 ### Product Performance Queries
@@ -114,14 +132,31 @@ GROUP BY p.product_name, p.category, p.stock, p.price
 ORDER BY p.stock ASC;
 
 -- Products with highest profit margins (assuming cost analysis)
-SELECT product_name, category, price, stock,
+SELECT p.product_name, p.category, p.price as current_price, p.stock,
+       COUNT(o.order_id) as total_orders,
+       SUM(o.quantity) as total_units_sold,
+       SUM(o.total_amount) as total_revenue,
+       AVG(o.price) as avg_selling_price,
+       ROUND(p.price * 0.4, 2) as estimated_profit_per_unit,
+       ROUND((p.price * 0.4) / p.price * 100, 2) as estimated_margin_percentage,
+       ROUND(SUM(o.quantity) * p.price * 0.4, 2) as estimated_total_profit,
+       ROUND(SUM(o.total_amount) / NULLIF(COUNT(o.order_id), 0), 2) as revenue_per_order,
        CASE 
-           WHEN price > 1000 THEN 'High-Value'
-           WHEN price > 500 THEN 'Medium-Value'
-           ELSE 'Low-Value'
-       END as price_category
-FROM text_to_sql_demo.products
-ORDER BY price DESC;
+           WHEN p.stock > 0 THEN ROUND(SUM(o.quantity) / p.stock, 2)
+           ELSE NULL 
+       END as inventory_turnover_ratio,
+       CASE 
+           WHEN p.price > 1000 THEN 'Premium'
+           WHEN p.price > 500 THEN 'Mid-Range'
+           WHEN p.price > 100 THEN 'Standard'
+           ELSE 'Budget'
+       END as price_tier
+FROM text_to_sql_demo.products p
+LEFT JOIN text_to_sql_demo.orders o ON p.product_name = o.product_name
+GROUP BY p.product_id, p.product_name, p.category, p.price, p.stock
+HAVING total_orders > 0
+ORDER BY estimated_margin_percentage DESC, total_revenue DESC
+LIMIT 15;
 ```
 
 ### Sales Analysis Queries
@@ -152,15 +187,24 @@ WHERE o.total_amount > 500
 ORDER BY o.order_date DESC
 LIMIT 20;
 
--- Regional sales performance
+-- Regional sales performance with comprehensive metrics
 SELECT c.state, c.country,
-       COUNT(DISTINCT c.customer_id) as customer_count,
+       COUNT(DISTINCT c.customer_id) as total_customers,
+       COUNT(DISTINCT CASE WHEN o.order_date >= CURRENT_DATE - INTERVAL '30' DAY THEN c.customer_id END) as active_customers_30d,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as total_revenue,
-       AVG(o.total_amount) as avg_order_value
+       AVG(o.total_amount) as avg_order_value,
+       SUM(o.quantity) as total_units_sold,
+       ROUND(SUM(o.total_amount) / COUNT(DISTINCT c.customer_id), 2) as revenue_per_customer,
+       ROUND(COUNT(o.order_id) * 1.0 / COUNT(DISTINCT c.customer_id), 2) as orders_per_customer,
+       ROUND(COUNT(DISTINCT CASE WHEN o.order_id IS NOT NULL THEN c.customer_id END) * 100.0 / COUNT(DISTINCT c.customer_id), 2) as customer_conversion_rate,
+       COUNT(CASE WHEN o.order_date >= CURRENT_DATE - INTERVAL '30' DAY THEN o.order_id END) as orders_last_30d,
+       SUM(CASE WHEN o.order_date >= CURRENT_DATE - INTERVAL '30' DAY THEN o.total_amount ELSE 0 END) as revenue_last_30d,
+       RANK() OVER (ORDER BY SUM(o.total_amount) DESC) as revenue_rank
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
 GROUP BY c.state, c.country
+HAVING total_customers >= 2
 ORDER BY total_revenue DESC;
 ```
 
