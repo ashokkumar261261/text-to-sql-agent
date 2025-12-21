@@ -1,0 +1,23 @@
+{
+  "name": "text-to-sql-kb-clean-v2",
+  "description": "Clean Knowledge Base with simple SQL patterns - auto index creation",
+  "roleArn": "arn:aws:iam::189796657651:role/BedrockKnowledgeBaseRole",
+  "knowledgeBaseConfiguration": {
+    "type": "VECTOR",
+    "vectorKnowledgeBaseConfiguration": {
+      "embeddingModelArn": "arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1"
+    }
+  },
+  "storageConfiguration": {
+    "type": "OPENSEARCH_SERVERLESS",
+    "opensearchServerlessConfiguration": {
+      "collectionArn": "arn:aws:aoss:us-east-1:189796657651:collection/e9ex0v2xiya5ccb91445",
+      "vectorIndexName": "bedrock-knowledge-base-clean-v2",
+      "fieldMapping": {
+        "vectorField": "bedrock-knowledge-base-clean-v2-vector",
+        "textField": "AMAZON_BEDROCK_TEXT_CHUNK",
+        "metadataField": "AMAZON_BEDROCK_METADATA"
+      }
+    }
+  }
+}
