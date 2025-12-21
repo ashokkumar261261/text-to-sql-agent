@@ -31,7 +31,7 @@ ORDER BY total_revenue DESC;
 ### Customer Churn Risk Analysis
 ```sql
 -- EXACT PATTERN for "Find customers at risk of churning"
-SELECT c.name, c.email, c.city, c.registration_date,
+SELECT c.name, c.email, c.city,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        MAX(o.order_date) as last_order_date,
@@ -44,7 +44,7 @@ SELECT c.name, c.email, c.city, c.registration_date,
        END as churn_risk_level
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
+GROUP BY c.customer_id, c.name, c.email, c.city
 HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
 ORDER BY lifetime_value DESC;
 ```
@@ -112,24 +112,24 @@ ORDER BY order_count DESC
 LIMIT 10;
 
 -- Customers from specific location
-SELECT name, email, city, state, registration_date
+SELECT name, email, city, state
 FROM text_to_sql_demo.customers
 WHERE state = 'California'
-ORDER BY registration_date DESC;
+ORDER BY name;
 
 -- Customer lifetime value analysis
-SELECT c.name, c.email, c.city, c.registration_date,
+SELECT c.name, c.email, c.city,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        AVG(o.total_amount) as avg_order_value,
        MAX(o.order_date) as last_order_date
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
+GROUP BY c.customer_id, c.name, c.email, c.city
 ORDER BY lifetime_value DESC;
 
 -- Customers at risk of churning (no orders in 90+ days)
-SELECT c.name, c.email, c.city, c.registration_date,
+SELECT c.name, c.email, c.city,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        MAX(o.order_date) as last_order_date,
@@ -141,11 +141,10 @@ SELECT c.name, c.email, c.city, c.registration_date,
            WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 90 THEN 'Medium Risk'
            WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 30 THEN 'Low Risk'
            ELSE 'Active'
-       END as churn_risk_level,
-       ROUND(COUNT(o.order_id) * 30.0 / GREATEST(date_diff('day', c.registration_date, CURRENT_DATE), 1), 2) as orders_per_month
+       END as churn_risk_level
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
+GROUP BY c.customer_id, c.name, c.email, c.city
 HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
 ORDER BY 
     CASE churn_risk_level 

@@ -14,7 +14,6 @@
 | city | string | Customer city |
 | state | string | Customer state/province |
 | country | string | Customer country |
-| registration_date | date | Date when customer registered |
 
 **Sample Query**: `SELECT * FROM text_to_sql_demo.customers LIMIT 10;`
 
@@ -115,7 +114,7 @@ ORDER BY total_revenue DESC;
 1. **Always use database prefix**: `text_to_sql_demo.table_name`
 2. **Product relationships**: Use `product_name` for joins between products and orders tables
 3. **Customer relationships**: Use `customer_id` for joins between customers and orders tables
-4. **Date filtering**: Use proper date format for `order_date` and `registration_date`
+4. **Date filtering**: Use proper date format for `order_date`
 5. **Aggregations**: Use appropriate GROUP BY clauses when using COUNT, SUM, AVG functions
 6. **Performance**: Always include LIMIT clause for large result sets
 7. **Column aliases**: Use meaningful aliases for calculated fields (e.g., `total_revenue`, `order_count`)

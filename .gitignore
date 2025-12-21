@@ -62,3 +62,6 @@ htmlcov/
 
 # Streamlit
 .streamlit/
+
+# Debug files
+web_ui_debug.py

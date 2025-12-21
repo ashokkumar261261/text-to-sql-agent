@@ -64,13 +64,13 @@ LIMIT 10;
 ```sql
 SELECT * FROM text_to_sql_demo.customers 
 WHERE state = 'California' OR city = 'New York'
-ORDER BY registration_date DESC;
+ORDER BY name;
 ```
 
 **"Find customers at risk of churning"** (no recent orders)
 ```sql
 -- Advanced churn risk analysis with multiple indicators
-SELECT c.name, c.email, c.city, c.registration_date,
+SELECT c.name, c.email, c.city,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        MAX(o.order_date) as last_order_date,
@@ -82,12 +82,10 @@ SELECT c.name, c.email, c.city, c.registration_date,
            WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 90 THEN 'Medium Risk'
            WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 30 THEN 'Low Risk'
            ELSE 'Active'
-       END as churn_risk_level,
-       -- Calculate order frequency (orders per month since registration)
-       ROUND(COUNT(o.order_id) * 30.0 / GREATEST(date_diff('day', c.registration_date, CURRENT_DATE), 1), 2) as orders_per_month
+       END as churn_risk_level
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email, c.city, c.registration_date
+GROUP BY c.customer_id, c.name, c.email, c.city
 HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
 ORDER BY 
     CASE churn_risk_level 
@@ -293,14 +291,14 @@ ORDER BY year DESC, month DESC;
 ### Advanced Analytics Patterns
 ```sql
 -- Customer Lifetime Value Analysis
-SELECT c.name, c.email, c.registration_date,
+SELECT c.name, c.email, c.city,
        COUNT(o.order_id) as total_orders,
        SUM(o.total_amount) as lifetime_value,
        AVG(o.total_amount) as avg_order_value,
        MAX(o.order_date) as last_order_date,
-       DATEDIFF(CURRENT_DATE, MAX(o.order_date)) as days_since_last_order
+       date_diff('day', MAX(o.order_date), CURRENT_DATE) as days_since_last_order
 FROM text_to_sql_demo.customers c
 LEFT JOIN text_to_sql_demo.orders o ON c.customer_id = o.customer_id
-GROUP BY c.customer_id, c.name, c.email, c.registration_date
+GROUP BY c.customer_id, c.name, c.email, c.city
 ORDER BY lifetime_value DESC;
 ```

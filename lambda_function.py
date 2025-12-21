@@ -856,7 +856,7 @@ def lambda_handler(event, context):
             <div class="data-explorer-grid">
                 <div class="table-card" onclick="viewTableData('customers')">
                     <h3>👥 Customers</h3>
-                    <p><strong>Columns:</strong> customer_id, name, email, phone, city, state, country, registration_date</p>
+                    <p><strong>Columns:</strong> customer_id, name, email, phone, city, state, country</p>
                     <p><strong>Description:</strong> Customer information and contact details</p>
                     <p style="color: #FFD700;">Click to view sample data →</p>
                 </div>
@@ -1645,7 +1645,6 @@ Table: customers
 - city (string) - Customer city
 - state (string) - Customer state
 - country (string) - Customer country
-- registration_date (date) - Registration date
 
 Table: orders  
 - order_id (bigint) - Primary Key
@@ -1672,6 +1671,12 @@ CRITICAL JOIN RULES:
 
 {kb_context_text}
 
+ATHENA-SPECIFIC FUNCTIONS (MANDATORY):
+- For date differences: Use date_diff('day', start_date, end_date) NOT DATEDIFF()
+- For current date: Use CURRENT_DATE
+- For date intervals: Use INTERVAL '30' DAY
+- For date extraction: Use EXTRACT(YEAR FROM date_column)
+
 SQL GENERATION RULES:
 1. ALWAYS prefix tables: {database_name}.table_name
 2. Use exact column names from schema above
@@ -1683,23 +1688,28 @@ SQL GENERATION RULES:
 8. Handle NULL values appropriately
 9. Use meaningful column aliases for calculated fields
 
-ATHENA-SPECIFIC FUNCTIONS:
-- For date differences: Use date_diff('day', start_date, end_date) NOT DATEDIFF()
-- For current date: Use CURRENT_DATE
-- For date intervals: Use INTERVAL '30' DAY
-- For date extraction: Use EXTRACT(YEAR FROM date_column)
+MANDATORY INSTRUCTION FOR QUERY: "{query}"
 
-MANDATORY: If the Knowledge Base above contains SQL examples that match this query type, 
-you MUST use those examples as your template. DO NOT generate simple SELECT * queries 
-when sophisticated business intelligence patterns are provided in the Knowledge Base.
+If this query is about customer churn or risk analysis, you MUST use this EXACT pattern:
+SELECT c.name, c.email, c.city,
+       COUNT(o.order_id) as total_orders,
+       SUM(o.total_amount) as lifetime_value,
+       MAX(o.order_date) as last_order_date,
+       date_diff('day', MAX(o.order_date), CURRENT_DATE) as days_since_last_order,
+       CASE 
+           WHEN MAX(o.order_date) IS NULL THEN 'Never Ordered'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 180 THEN 'High Risk'
+           WHEN date_diff('day', MAX(o.order_date), CURRENT_DATE) > 90 THEN 'Medium Risk'
+           ELSE 'Low Risk'
+       END as churn_risk_level
+FROM {database_name}.customers c
+LEFT JOIN {database_name}.orders o ON c.customer_id = o.customer_id
+GROUP BY c.customer_id, c.name, c.email, c.city
+HAVING churn_risk_level IN ('High Risk', 'Medium Risk', 'Never Ordered')
+ORDER BY lifetime_value DESC
+LIMIT 20;
 
-For the query: "{query}"
-
-If this is about:
-- Customer churn/risk: Use complex churn analysis with risk scoring
-- Regional sales comparison: Use comprehensive regional metrics with rankings
-- Product profit margins: Use advanced profitability calculations
-- Any business intelligence query: Use the sophisticated patterns from Knowledge Base
+CRITICAL: Use date_diff('day', start_date, end_date) NOT DATEDIFF() for Athena compatibility.
 
 Generate ONLY the SQL query. No explanations, markdown formatting, or additional text.
 
