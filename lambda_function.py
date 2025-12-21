@@ -787,13 +787,6 @@ def lambda_handler(event, context):
         <h1>🤖 Text-to-SQL AI Agent</h1>
         <p class="subtitle">Enhanced with Knowledge Base Intelligence</p>
         
-        <div class="deployment-info">
-            <h2>🎉 Enhanced AI SQL Generation!</h2>
-            <span class="status-badge">✅ Live with Bedrock AI</span>
-            <span class="kb-badge">🧠 Knowledge Base Enhanced</span>
-            <p>Ask questions in natural language and get context-aware SQL queries</p>
-        </div>
-
         <!-- Tab Navigation -->
         <div class="tab-container">
             <button class="tab-button active" onclick="showTab('query')">🤖 AI Query</button>
