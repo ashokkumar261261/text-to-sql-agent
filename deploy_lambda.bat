@@ -25,7 +25,7 @@ mkdir temp_deploy
 
 REM Copy lambda function
 copy lambda_function.py temp_deploy\
-copy -r kb_documents temp_deploy\ 2>nul || echo kb_documents not found, skipping...
+xcopy kb_documents temp_deploy\kb_documents\ /E /I /Q 2>nul || echo kb_documents not found, skipping...
 
 REM Create zip package
 cd temp_deploy

@@ -3,6 +3,337 @@ import boto3
 import os
 from datetime import datetime
 
+def handle_query_request(body):
+    """Handle regular AI query requests"""
+    query = body.get('query', '')
+    
+    # Initialize AWS clients
+    try:
+        bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
+        bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
+        athena_client = boto3.client('athena', region_name='us-east-1')
+        
+        # Get Knowledge Base context first
+        kb_context = get_knowledge_base_context(bedrock_agent, query)
+        
+        # Generate enhanced SQL using Bedrock LLM + Knowledge Base context
+        # If query starts with SELECT, use it directly for testing
+        if query.strip().upper().startswith('SELECT'):
+            sql_query = query.strip()
+            print(f"Using direct SQL query for testing: {sql_query}")
+        else:
+            sql_query = generate_enhanced_sql_with_bedrock(bedrock_runtime, query, kb_context)
+        
+        # Try to execute with Athena (if configured)
+        results = []
+        row_count = 0
+        database = "demo_database"
+        athena_error_msg = None
+        athena_configured = False
+        
+        # Check if Athena is configured
+        glue_database = os.environ.get('GLUE_DATABASE')
+        athena_output = os.environ.get('ATHENA_OUTPUT_LOCATION')
+        
+        if glue_database and athena_output:
+            athena_configured = True
+            try:
+                print(f"Attempting Athena execution with database: {glue_database}")
+                results, row_count = execute_athena_query(athena_client, sql_query, glue_database, athena_output)
+                database = glue_database
+                print(f"Athena execution successful: {row_count} rows returned")
+                
+                # Additional debugging
+                if row_count == 0:
+                    print("WARNING: Athena query succeeded but returned 0 rows")
+                    print(f"SQL Query was: {sql_query}")
+                    print(f"Database: {glue_database}")
+                else:
+                    print(f"SUCCESS: Got {row_count} rows from Athena")
+                    print(f"First row sample: {results[0] if results else 'No results'}")
+                    
+            except Exception as athena_error:
+                athena_error_msg = str(athena_error)
+                print(f"Athena execution failed: {athena_error_msg}")
+                # Don't use fallback data - show the error instead
+        else:
+            print("Athena not configured - using demo mode")
+        
+        # Format the response
+        response_data = {
+            'success': True,
+            'query': query,
+            'sql': sql_query,
+            'explanation': f'Generated SQL query using AI and business context for: "{query}". {kb_context.get("explanation", "")}',
+            'results': results,
+            'row_count': row_count,
+            'cached': False,
+            'knowledge_base_used': kb_context.get('used', False),
+            'database': database,
+            'kb_insights': kb_context.get('insights', []),
+            'athena_configured': athena_configured
+        }
+        
+        # Handle Athena errors - show actual error instead of fallback
+        if athena_error_msg:
+            response_data['athena_error'] = athena_error_msg
+            response_data['error_details'] = f"Athena Query Execution Failed: {athena_error_msg}"
+            response_data['columns'] = []
+            response_data['success'] = True  # Still show the SQL that was generated
+            # Don't provide sample data when there's an actual error
+        elif results and len(results) > 0:
+            # Successful Athena execution with data
+            response_data['columns'] = list(results[0].keys())
+            print(f"SUCCESS: Returning {len(results)} rows with columns: {response_data['columns']}")
+        elif athena_configured and row_count == 0:
+            # Athena configured and query succeeded but no results (empty result set)
+            response_data['columns'] = []
+            response_data['message'] = "Query executed successfully but returned no results. This could mean:"
+            response_data['suggestions'] = [
+                "The query conditions don't match any data in the database",
+                "The table might be empty or the date range might be outside available data",
+                "Check if the table and column names are correct",
+                f"Verify data exists in database '{database}'"
+            ]
+            print(f"EMPTY RESULT: Query succeeded but returned 0 rows")
+        else:
+            # Athena not configured - provide sample data
+            response_data['columns'] = []
+            response_data['results'] = generate_sample_data(query)
+            response_data['columns'] = list(response_data['results'][0].keys()) if response_data['results'] else []
+            response_data['row_count'] = len(response_data['results'])
+            response_data['sample_data'] = True
+            print(f"DEMO MODE: Returning {len(response_data['results'])} sample rows")
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+            },
+            'body': json.dumps(response_data)
+        }
+        
+    except Exception as aws_error:
+        error_message = str(aws_error)
+        
+        # Provide more specific error messages
+        if "credentials" in error_message.lower():
+            error_message = "AWS credentials not configured properly. Please check Lambda execution role permissions."
+        elif "bedrock" in error_message.lower():
+            error_message = "Amazon Bedrock access error. Please check model permissions and region configuration."
+        elif "athena" in error_message.lower():
+            error_message = "Amazon Athena access error. Please check database configuration and permissions."
+        elif "knowledge" in error_message.lower():
+            error_message = "Knowledge Base access error. Please check Bedrock Knowledge Base configuration."
+        
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': False,
+                'error': f"AWS Service Error: {error_message}",
+                'query': body.get('query', ''),
+                'fallback_message': "Please check your AWS configuration and permissions."
+            })
+        }
+
+
+def handle_view_table_data(table_name):
+    """Handle requests to view sample table data"""
+    try:
+        athena_client = boto3.client('athena', region_name='us-east-1')
+        glue_database = os.environ.get('GLUE_DATABASE', 'text_to_sql_demo')
+        athena_output = os.environ.get('ATHENA_OUTPUT_LOCATION')
+        
+        if not athena_output:
+            # Return sample data if Athena not configured
+            sample_data = generate_sample_data(f"show me data from {table_name}")
+            return {
+                'statusCode': 200,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'success': True,
+                    'results': sample_data,
+                    'columns': list(sample_data[0].keys()) if sample_data else [],
+                    'row_count': len(sample_data),
+                    'sample_data': True
+                })
+            }
+        
+        # Execute query to get sample data
+        sql_query = f"SELECT * FROM {glue_database}.{table_name} LIMIT 10"
+        results, row_count = execute_athena_query(athena_client, sql_query, glue_database, athena_output)
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': True,
+                'results': results,
+                'columns': list(results[0].keys()) if results else [],
+                'row_count': row_count
+            })
+        }
+        
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': False,
+                'error': f"Error retrieving table data: {str(e)}"
+            })
+        }
+
+
+def handle_view_kb_file(file_name):
+    """Handle requests to view knowledge base files"""
+    try:
+        # Map of available KB files
+        kb_files = {
+            'database_schema.md': 'kb_documents/database_schema.md',
+            'business_glossary.md': 'kb_documents/business_glossary.md', 
+            'sql_examples.md': 'kb_documents/sql_examples.md'
+        }
+        
+        if file_name not in kb_files:
+            return {
+                'statusCode': 404,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                'body': json.dumps({
+                    'success': False,
+                    'error': 'Knowledge base file not found'
+                })
+            }
+        
+        # Try to read the file from the Lambda package
+        try:
+            with open(kb_files[file_name], 'r', encoding='utf-8') as f:
+                content = f.read()
+        except FileNotFoundError:
+            # If file not found locally, provide a sample content
+            content = f"# {file_name}\n\nThis knowledge base file is not available in the current deployment.\n\nTo view the actual content, ensure the kb_documents folder is included in your Lambda deployment package."
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': True,
+                'content': content,
+                'file_name': file_name
+            })
+        }
+        
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': False,
+                'error': f"Error reading knowledge base file: {str(e)}"
+            })
+        }
+
+
+def handle_download_kb_file(file_name):
+    """Handle requests to download knowledge base files"""
+    return handle_view_kb_file(file_name)  # Same logic for now
+
+
+def handle_file_upload(event, context):
+    """Handle file upload requests"""
+    try:
+        # For now, return a placeholder response
+        # In a real implementation, you would:
+        # 1. Parse the multipart form data
+        # 2. Upload files to S3
+        # 3. Update the knowledge base
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': True,
+                'message': 'File upload feature is under development. Please contact your administrator to update knowledge base files.'
+            })
+        }
+        
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': False,
+                'error': f"Upload error: {str(e)}"
+            })
+        }
+
+
+def handle_reindex_knowledge_base():
+    """Handle knowledge base reindexing requests"""
+    try:
+        # For now, return a placeholder response
+        # In a real implementation, you would:
+        # 1. Trigger Bedrock Knowledge Base sync
+        # 2. Wait for completion
+        # 3. Return status
+        
+        return {
+            'statusCode': 200,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': True,
+                'message': 'Knowledge base reindexing feature is under development. Please contact your administrator to reindex the knowledge base.'
+            })
+        }
+        
+    except Exception as e:
+        return {
+            'statusCode': 500,
+            'headers': {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            'body': json.dumps({
+                'success': False,
+                'error': f"Reindexing error: {str(e)}"
+            })
+        }
+
+
 def lambda_handler(event, context):
     """
     AWS Lambda handler for Text-to-SQL Agent with Bedrock Knowledge Base integration
@@ -12,145 +343,29 @@ def lambda_handler(event, context):
         # Check if this is a POST request with a query
         if event.get('requestContext', {}).get('http', {}).get('method') == 'POST':
             try:
-                body = json.loads(event.get('body', '{}'))
-                query = body.get('query', '')
-                
-                # Initialize AWS clients
-                try:
-                    bedrock_runtime = boto3.client('bedrock-runtime', region_name='us-east-1')
-                    bedrock_agent = boto3.client('bedrock-agent-runtime', region_name='us-east-1')
-                    athena_client = boto3.client('athena', region_name='us-east-1')
+                # Handle different content types
+                if 'multipart/form-data' in event.get('headers', {}).get('content-type', ''):
+                    # Handle file upload
+                    return handle_file_upload(event, context)
+                else:
+                    # Handle JSON requests
+                    body = json.loads(event.get('body', '{}'))
                     
-                    # Get Knowledge Base context first
-                    kb_context = get_knowledge_base_context(bedrock_agent, query)
+                    # Check for different actions
+                    action = body.get('action')
                     
-                    # Generate enhanced SQL using Bedrock LLM + Knowledge Base context
-                    # If query starts with SELECT, use it directly for testing
-                    if query.strip().upper().startswith('SELECT'):
-                        sql_query = query.strip()
-                        print(f"Using direct SQL query for testing: {sql_query}")
+                    if action == 'view_table_data':
+                        return handle_view_table_data(body.get('table_name'))
+                    elif action == 'view_kb_file':
+                        return handle_view_kb_file(body.get('file_name'))
+                    elif action == 'download_kb_file':
+                        return handle_download_kb_file(body.get('file_name'))
+                    elif action == 'reindex_knowledge_base':
+                        return handle_reindex_knowledge_base()
                     else:
-                        sql_query = generate_enhanced_sql_with_bedrock(bedrock_runtime, query, kb_context)
-                    
-                    # Try to execute with Athena (if configured)
-                    results = []
-                    row_count = 0
-                    database = "demo_database"
-                    athena_error_msg = None
-                    athena_configured = False
-                    
-                    # Check if Athena is configured
-                    glue_database = os.environ.get('GLUE_DATABASE')
-                    athena_output = os.environ.get('ATHENA_OUTPUT_LOCATION')
-                    
-                    if glue_database and athena_output:
-                        athena_configured = True
-                        try:
-                            print(f"Attempting Athena execution with database: {glue_database}")
-                            results, row_count = execute_athena_query(athena_client, sql_query, glue_database, athena_output)
-                            database = glue_database
-                            print(f"Athena execution successful: {row_count} rows returned")
-                            
-                            # Additional debugging
-                            if row_count == 0:
-                                print("WARNING: Athena query succeeded but returned 0 rows")
-                                print(f"SQL Query was: {sql_query}")
-                                print(f"Database: {glue_database}")
-                            else:
-                                print(f"SUCCESS: Got {row_count} rows from Athena")
-                                print(f"First row sample: {results[0] if results else 'No results'}")
-                                
-                        except Exception as athena_error:
-                            athena_error_msg = str(athena_error)
-                            print(f"Athena execution failed: {athena_error_msg}")
-                            # Don't use fallback data - show the error instead
-                    else:
-                        print("Athena not configured - using demo mode")
-                    
-                    # Format the response
-                    response_data = {
-                        'success': True,
-                        'query': query,
-                        'sql': sql_query,
-                        'explanation': f'Generated SQL query using AI and business context for: "{query}". {kb_context.get("explanation", "")}',
-                        'results': results,
-                        'row_count': row_count,
-                        'cached': False,
-                        'knowledge_base_used': kb_context.get('used', False),
-                        'database': database,
-                        'kb_insights': kb_context.get('insights', []),
-                        'athena_configured': athena_configured
-                    }
-                    
-                    # Handle Athena errors - show actual error instead of fallback
-                    if athena_error_msg:
-                        response_data['athena_error'] = athena_error_msg
-                        response_data['error_details'] = f"Athena Query Execution Failed: {athena_error_msg}"
-                        response_data['columns'] = []
-                        response_data['success'] = True  # Still show the SQL that was generated
-                        # Don't provide sample data when there's an actual error
-                    elif results and len(results) > 0:
-                        # Successful Athena execution with data
-                        response_data['columns'] = list(results[0].keys())
-                        print(f"SUCCESS: Returning {len(results)} rows with columns: {response_data['columns']}")
-                    elif athena_configured and row_count == 0:
-                        # Athena configured and query succeeded but no results (empty result set)
-                        response_data['columns'] = []
-                        response_data['message'] = "Query executed successfully but returned no results. This could mean:"
-                        response_data['suggestions'] = [
-                            "The query conditions don't match any data in the database",
-                            "The table might be empty or the date range might be outside available data",
-                            "Check if the table and column names are correct",
-                            f"Verify data exists in database '{database}'"
-                        ]
-                        print(f"EMPTY RESULT: Query succeeded but returned 0 rows")
-                    else:
-                        # Athena not configured - provide sample data
-                        response_data['columns'] = []
-                        response_data['results'] = generate_sample_data(query)
-                        response_data['columns'] = list(response_data['results'][0].keys()) if response_data['results'] else []
-                        response_data['row_count'] = len(response_data['results'])
-                        response_data['sample_data'] = True
-                        print(f"DEMO MODE: Returning {len(response_data['results'])} sample rows")
-                    
-                    return {
-                        'statusCode': 200,
-                        'headers': {
-                            'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
-                            'Access-Control-Allow-Headers': 'Content-Type',
-                            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
-                        },
-                        'body': json.dumps(response_data)
-                    }
-                    
-                except Exception as aws_error:
-                    error_message = str(aws_error)
-                    
-                    # Provide more specific error messages
-                    if "credentials" in error_message.lower():
-                        error_message = "AWS credentials not configured properly. Please check Lambda execution role permissions."
-                    elif "bedrock" in error_message.lower():
-                        error_message = "Amazon Bedrock access error. Please check model permissions and region configuration."
-                    elif "athena" in error_message.lower():
-                        error_message = "Amazon Athena access error. Please check database configuration and permissions."
-                    elif "knowledge" in error_message.lower():
-                        error_message = "Knowledge Base access error. Please check Bedrock Knowledge Base configuration."
-                    
-                    return {
-                        'statusCode': 500,
-                        'headers': {
-                            'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*'
-                        },
-                        'body': json.dumps({
-                            'success': False,
-                            'error': f"AWS Service Error: {error_message}",
-                            'query': query,
-                            'fallback_message': "Please check your AWS configuration and permissions."
-                        })
-                    }
-                    
+                        # Handle regular query
+                        return handle_query_request(body)
+                        
             except Exception as e:
                 return {
                     'statusCode': 400,
@@ -160,7 +375,7 @@ def lambda_handler(event, context):
                     },
                     'body': json.dumps({'success': False, 'error': str(e)})
                 }
-        
+                
         # Serve the HTML interface for GET requests
         html_content = """
 <!DOCTYPE html>
@@ -248,6 +463,153 @@ def lambda_handler(event, context):
             opacity: 0.6;
             cursor: not-allowed;
             transform: none;
+        }
+        .tab-container {
+            display: flex;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+        .tab-button {
+            flex: 1;
+            padding: 15px 20px;
+            background: transparent;
+            border: none;
+            color: white;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .tab-button.active {
+            background: rgba(255, 215, 0, 0.3);
+            color: #FFD700;
+        }
+        .tab-button:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        .tab-content {
+            display: none;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            margin: 10px 0;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .data-explorer-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .table-card {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .table-card:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: translateY(-2px);
+        }
+        .table-card h3 {
+            margin-top: 0;
+            color: #FFD700;
+        }
+        .kb-file-list {
+            list-style: none;
+            padding: 0;
+        }
+        .kb-file-item {
+            background: rgba(255, 255, 255, 0.1);
+            margin: 10px 0;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #FFD700;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .kb-file-item:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        .upload-area {
+            border: 2px dashed rgba(255, 215, 0, 0.5);
+            border-radius: 10px;
+            padding: 40px;
+            text-align: center;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+        }
+        .upload-area:hover {
+            border-color: #FFD700;
+            background: rgba(255, 215, 0, 0.1);
+        }
+        .upload-area.dragover {
+            border-color: #FFD700;
+            background: rgba(255, 215, 0, 0.2);
+        }
+        .file-input {
+            display: none;
+        }
+        .upload-btn {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            padding: 12px 25px;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 10px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+        }
+        .modal-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 15px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            color: white;
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover {
+            color: #FFD700;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #28a745, #20c997);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
         }
         .result-container {
             margin-top: 20px;
@@ -432,53 +794,155 @@ def lambda_handler(event, context):
             <p>Ask questions in natural language and get context-aware SQL queries</p>
         </div>
 
-        <!-- Interactive Query Interface -->
-        <div class="query-interface">
-            <h2>💬 Ask Your Question</h2>
-            <p>Type a natural language question about your data:</p>
-            <input type="text" id="queryInput" class="query-input" placeholder="e.g., Show me top 5 customers by revenue" />
-            <button id="queryBtn" class="query-btn" onclick="processQuery()">
-                🚀 Generate Enhanced SQL Query
-            </button>
-            
-            <div id="resultContainer" class="result-container">
-                <h3>📊 Generated SQL:</h3>
-                <div id="sqlOutput" class="sql-output"></div>
-                <h3>💡 AI Explanation:</h3>
-                <div id="explanationOutput"></div>
-                <h3>📋 Query Results:</h3>
-                <div id="resultsOutput" style="margin-top: 15px;">
-                    <div id="resultsTable"></div>
-                    <div id="resultsCount" style="margin-top: 10px; font-style: italic; color: #FFD700;"></div>
+        <!-- Tab Navigation -->
+        <div class="tab-container">
+            <button class="tab-button active" onclick="showTab('query')">🤖 AI Query</button>
+            <button class="tab-button" onclick="showTab('explorer')">📊 Data Explorer</button>
+            <button class="tab-button" onclick="showTab('knowledge')">🧠 Knowledge Base</button>
+            <button class="tab-button" onclick="showTab('upload')">📤 Upload KB</button>
+        </div>
+
+        <!-- AI Query Tab -->
+        <div id="queryTab" class="tab-content active">
+            <!-- Interactive Query Interface -->
+            <div class="query-interface">
+                <h2>💬 Ask Your Question</h2>
+                <p>Type a natural language question about your data:</p>
+                <input type="text" id="queryInput" class="query-input" placeholder="e.g., Show me top 5 customers by revenue" />
+                <button id="queryBtn" class="query-btn" onclick="processQuery()">
+                    🚀 Generate Enhanced SQL Query
+                </button>
+                
+                <div id="resultContainer" class="result-container">
+                    <h3>📊 Generated SQL:</h3>
+                    <div id="sqlOutput" class="sql-output"></div>
+                    <h3>💡 AI Explanation:</h3>
+                    <div id="explanationOutput"></div>
+                    <h3>📋 Query Results:</h3>
+                    <div id="resultsOutput" style="margin-top: 15px;">
+                        <div id="resultsTable"></div>
+                        <div id="resultsCount" style="margin-top: 10px; font-style: italic; color: #FFD700;"></div>
+                    </div>
+                    <div id="kbInsights" class="kb-insights" style="display: none;">
+                        <h4>🧠 Knowledge Base Insights:</h4>
+                        <div id="kbDetails"></div>
+                    </div>
+                    <div id="systemInfo" class="system-info" style="display: none;">
+                        <h4>🔧 System Information:</h4>
+                        <div id="systemDetails"></div>
+                    </div>
                 </div>
-                <div id="kbInsights" class="kb-insights" style="display: none;">
-                    <h4>🧠 Knowledge Base Insights:</h4>
-                    <div id="kbDetails"></div>
+            </div>
+
+            <div class="demo-section">
+                <h2>💡 Try These Enhanced Questions</h2>
+                <p>Click on any example to try it:</p>
+                <div class="query-example" onclick="setQuery('Show me top 5 customers by revenue')">
+                    "Show me top 5 customers by revenue"
                 </div>
-                <div id="systemInfo" class="system-info" style="display: none;">
-                    <h4>🔧 System Information:</h4>
-                    <div id="systemDetails"></div>
+                <div class="query-example" onclick="setQuery('What are the trending products this month?')">
+                    "What are the trending products this month?"
+                </div>
+                <div class="query-example" onclick="setQuery('Find customers at risk of churning')">
+                    "Find customers at risk of churning"
+                </div>
+                <div class="query-example" onclick="setQuery('Compare sales performance by region')">
+                    "Compare sales performance by region"
+                </div>
+                <div class="query-example" onclick="setQuery('Which products have the highest profit margins?')">
+                    "Which products have the highest profit margins?"
                 </div>
             </div>
         </div>
 
-        <div class="demo-section">
-            <h2>💡 Try These Enhanced Questions</h2>
-            <p>Click on any example to try it:</p>
-            <div class="query-example" onclick="setQuery('Show me top 5 customers by revenue')">
-                "Show me top 5 customers by revenue"
+        <!-- Data Explorer Tab -->
+        <div id="explorerTab" class="tab-content">
+            <h2>📊 Database Explorer</h2>
+            <p>Click on any table to view sample data:</p>
+            
+            <div class="data-explorer-grid">
+                <div class="table-card" onclick="viewTableData('customers')">
+                    <h3>👥 Customers</h3>
+                    <p><strong>Columns:</strong> customer_id, name, email, phone, city, state, country, registration_date</p>
+                    <p><strong>Description:</strong> Customer information and contact details</p>
+                    <p style="color: #FFD700;">Click to view sample data →</p>
+                </div>
+                
+                <div class="table-card" onclick="viewTableData('orders')">
+                    <h3>🛒 Orders</h3>
+                    <p><strong>Columns:</strong> order_id, customer_id, product_name, category, quantity, price, total_amount, order_date, status</p>
+                    <p><strong>Description:</strong> Order transactions and details</p>
+                    <p style="color: #FFD700;">Click to view sample data →</p>
+                </div>
+                
+                <div class="table-card" onclick="viewTableData('products')">
+                    <h3>📦 Products</h3>
+                    <p><strong>Columns:</strong> product_id, product_name, category, price, stock, supplier</p>
+                    <p><strong>Description:</strong> Product catalog and inventory</p>
+                    <p style="color: #FFD700;">Click to view sample data →</p>
+                </div>
             </div>
-            <div class="query-example" onclick="setQuery('What are the trending products this month?')">
-                "What are the trending products this month?"
+            
+            <div id="tableDataContainer" class="result-container" style="display: none;">
+                <h3 id="tableDataTitle">📊 Table Data:</h3>
+                <div id="tableDataOutput"></div>
+                <div id="tableDataCount" style="margin-top: 10px; font-style: italic; color: #FFD700;"></div>
             </div>
-            <div class="query-example" onclick="setQuery('Find customers at risk of churning')">
-                "Find customers at risk of churning"
+        </div>
+
+        <!-- Knowledge Base Tab -->
+        <div id="knowledgeTab" class="tab-content">
+            <h2>🧠 Knowledge Base Documents</h2>
+            <p>View and download the knowledge base files that enhance AI query generation:</p>
+            
+            <ul class="kb-file-list">
+                <li class="kb-file-item" onclick="viewKBFile('database_schema.md')">
+                    <h4>📋 Database Schema</h4>
+                    <p>Complete table structures, relationships, and data types</p>
+                    <small>Click to view content</small>
+                </li>
+                <li class="kb-file-item" onclick="viewKBFile('business_glossary.md')">
+                    <h4>📚 Business Glossary</h4>
+                    <p>Business terminology, definitions, and domain-specific language</p>
+                    <small>Click to view content</small>
+                </li>
+                <li class="kb-file-item" onclick="viewKBFile('sql_examples.md')">
+                    <h4>💡 SQL Examples</h4>
+                    <p>Common query patterns and best practices</p>
+                    <small>Click to view content</small>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Upload Knowledge Base Tab -->
+        <div id="uploadTab" class="tab-content">
+            <h2>📤 Upload Knowledge Base Files</h2>
+            <p>Upload new knowledge base documents to enhance AI query generation:</p>
+            
+            <div class="upload-area" id="uploadArea" ondrop="dropHandler(event);" ondragover="dragOverHandler(event);" ondragleave="dragLeaveHandler(event);">
+                <h3>📁 Drag & Drop Files Here</h3>
+                <p>Or click to select files</p>
+                <input type="file" id="fileInput" class="file-input" multiple accept=".md,.txt,.pdf,.docx" onchange="handleFileSelect(event)">
+                <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+                    📂 Select Files
+                </button>
+                <p><small>Supported formats: .md, .txt, .pdf, .docx</small></p>
             </div>
-            <div class="query-example" onclick="setQuery('Compare sales performance by region')">
-                "Compare sales performance by region"
+            
+            <div id="uploadProgress" style="display: none;">
+                <h4>📤 Upload Progress:</h4>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <div id="uploadStatus">Preparing upload...</div>
             </div>
-            <div class="query-example" onclick="setQuery('Which products have the highest profit margins?')">
-                "Which products have the highest profit margins?"
+            
+            <div id="uploadResults" style="display: none;">
+                <h4>✅ Upload Results:</h4>
+                <div id="uploadResultsList"></div>
+                <button class="upload-btn" onclick="reindexKnowledgeBase()" id="reindexBtn" style="display: none;">
+                    🔄 Reindex Knowledge Base
+                </button>
             </div>
         </div>
 
@@ -518,7 +982,321 @@ def lambda_handler(event, context):
         </div>
     </div>
 
+    <!-- Modal for viewing KB files and table data -->
+    <div id="contentModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modalTitle">Content Viewer</h2>
+            <div id="modalContent">Loading...</div>
+        </div>
+    </div>
+
     <script>
+        // Tab Management
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => tab.classList.remove('active'));
+            
+            // Remove active class from all tab buttons
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            
+            // Show selected tab content
+            document.getElementById(tabName + 'Tab').classList.add('active');
+            
+            // Add active class to clicked button
+            event.target.classList.add('active');
+        }
+
+        // Modal Management
+        function openModal(title, content) {
+            document.getElementById('modalTitle').textContent = title;
+            document.getElementById('modalContent').innerHTML = content;
+            document.getElementById('contentModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('contentModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('contentModal');
+            if (event.target == modal) {
+                modal.style.display = 'none';
+            }
+        }
+
+        // Data Explorer Functions
+        function viewTableData(tableName) {
+            const tableDataContainer = document.getElementById('tableDataContainer');
+            const tableDataTitle = document.getElementById('tableDataTitle');
+            const tableDataOutput = document.getElementById('tableDataOutput');
+            const tableDataCount = document.getElementById('tableDataCount');
+            
+            tableDataTitle.textContent = `📊 ${tableName.charAt(0).toUpperCase() + tableName.slice(1)} Table Data:`;
+            tableDataOutput.innerHTML = '<div style="text-align: center; padding: 20px;">Loading table data...</div>';
+            tableDataContainer.style.display = 'block';
+            
+            // Scroll to results
+            tableDataContainer.scrollIntoView({ behavior: 'smooth' });
+            
+            // Make API call to get table data
+            fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'view_table_data',
+                    table_name: tableName 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success && data.results && data.results.length > 0) {
+                    let tableHTML = '<table class="results-table"><thead><tr>';
+                    
+                    // Add headers
+                    data.columns.forEach(column => {
+                        tableHTML += `<th>${column.replace('_', ' ').toUpperCase()}</th>`;
+                    });
+                    tableHTML += '</tr></thead><tbody>';
+                    
+                    // Add data rows
+                    data.results.forEach(row => {
+                        tableHTML += '<tr>';
+                        data.columns.forEach(column => {
+                            let value = row[column];
+                            if (typeof value === 'number' && value > 1000) {
+                                value = value.toLocaleString();
+                            }
+                            tableHTML += `<td>${value || ''}</td>`;
+                        });
+                        tableHTML += '</tr>';
+                    });
+                    
+                    tableHTML += '</tbody></table>';
+                    tableDataOutput.innerHTML = tableHTML;
+                    tableDataCount.innerHTML = `📊 Showing ${data.row_count} sample records from ${tableName} table`;
+                } else {
+                    tableDataOutput.innerHTML = `<div class="no-results">No data available for ${tableName} table</div>`;
+                    tableDataCount.innerHTML = '';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                tableDataOutput.innerHTML = '<div class="error-info">Error loading table data. Please try again.</div>';
+                tableDataCount.innerHTML = '';
+            });
+        }
+
+        // Knowledge Base Functions
+        function viewKBFile(fileName) {
+            openModal(`📄 ${fileName}`, '<div style="text-align: center; padding: 20px;">Loading knowledge base file...</div>');
+            
+            // Make API call to get KB file content
+            fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'view_kb_file',
+                    file_name: fileName 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const content = `
+                        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 10px; margin: 10px 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <h3 style="margin: 0;">📄 ${fileName}</h3>
+                                <button onclick="downloadKBFile('${fileName}')" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">
+                                    📥 Download
+                                </button>
+                            </div>
+                            <pre style="white-space: pre-wrap; font-family: 'Courier New', monospace; font-size: 0.9em; line-height: 1.4; max-height: 400px; overflow-y: auto;">${data.content}</pre>
+                        </div>
+                    `;
+                    document.getElementById('modalContent').innerHTML = content;
+                } else {
+                    document.getElementById('modalContent').innerHTML = '<div class="error-info">Error loading knowledge base file.</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('modalContent').innerHTML = '<div class="error-info">Error loading knowledge base file.</div>';
+            });
+        }
+
+        function downloadKBFile(fileName) {
+            // Create download link
+            fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'download_kb_file',
+                    file_name: fileName 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const blob = new Blob([data.content], { type: 'text/markdown' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }
+            });
+        }
+
+        // File Upload Functions
+        function dragOverHandler(ev) {
+            ev.preventDefault();
+            document.getElementById('uploadArea').classList.add('dragover');
+        }
+
+        function dragLeaveHandler(ev) {
+            ev.preventDefault();
+            document.getElementById('uploadArea').classList.remove('dragover');
+        }
+
+        function dropHandler(ev) {
+            ev.preventDefault();
+            document.getElementById('uploadArea').classList.remove('dragover');
+            
+            const files = ev.dataTransfer.files;
+            handleFiles(files);
+        }
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            handleFiles(files);
+        }
+
+        function handleFiles(files) {
+            if (files.length === 0) return;
+            
+            const uploadProgress = document.getElementById('uploadProgress');
+            const uploadResults = document.getElementById('uploadResults');
+            const progressFill = document.getElementById('progressFill');
+            const uploadStatus = document.getElementById('uploadStatus');
+            
+            uploadProgress.style.display = 'block';
+            uploadResults.style.display = 'none';
+            
+            let uploadedFiles = [];
+            let totalFiles = files.length;
+            let completedFiles = 0;
+            
+            Array.from(files).forEach((file, index) => {
+                const formData = new FormData();
+                formData.append('file', file);
+                formData.append('action', 'upload_kb_file');
+                
+                uploadStatus.textContent = `Uploading ${file.name}...`;
+                
+                fetch(window.location.href, {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    completedFiles++;
+                    const progress = (completedFiles / totalFiles) * 100;
+                    progressFill.style.width = progress + '%';
+                    
+                    if (data.success) {
+                        uploadedFiles.push({ name: file.name, status: 'success', message: data.message });
+                    } else {
+                        uploadedFiles.push({ name: file.name, status: 'error', message: data.error });
+                    }
+                    
+                    if (completedFiles === totalFiles) {
+                        uploadStatus.textContent = 'Upload completed!';
+                        showUploadResults(uploadedFiles);
+                    }
+                })
+                .catch(error => {
+                    completedFiles++;
+                    uploadedFiles.push({ name: file.name, status: 'error', message: 'Upload failed' });
+                    
+                    if (completedFiles === totalFiles) {
+                        uploadStatus.textContent = 'Upload completed with errors!';
+                        showUploadResults(uploadedFiles);
+                    }
+                });
+            });
+        }
+
+        function showUploadResults(uploadedFiles) {
+            const uploadResults = document.getElementById('uploadResults');
+            const uploadResultsList = document.getElementById('uploadResultsList');
+            const reindexBtn = document.getElementById('reindexBtn');
+            
+            let resultsHTML = '';
+            let hasSuccessfulUploads = false;
+            
+            uploadedFiles.forEach(file => {
+                const statusIcon = file.status === 'success' ? '✅' : '❌';
+                const statusClass = file.status === 'success' ? 'system-info' : 'error-info';
+                
+                resultsHTML += `
+                    <div class="${statusClass}" style="margin: 10px 0; padding: 10px; border-radius: 5px;">
+                        ${statusIcon} <strong>${file.name}</strong>: ${file.message}
+                    </div>
+                `;
+                
+                if (file.status === 'success') {
+                    hasSuccessfulUploads = true;
+                }
+            });
+            
+            uploadResultsList.innerHTML = resultsHTML;
+            uploadResults.style.display = 'block';
+            
+            if (hasSuccessfulUploads) {
+                reindexBtn.style.display = 'inline-block';
+            }
+        }
+
+        function reindexKnowledgeBase() {
+            const reindexBtn = document.getElementById('reindexBtn');
+            reindexBtn.disabled = true;
+            reindexBtn.textContent = '🔄 Reindexing...';
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'reindex_knowledge_base' })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    reindexBtn.textContent = '✅ Reindexing Complete';
+                    reindexBtn.style.background = '#28a745';
+                    alert('✅ Knowledge Base has been successfully reindexed with new files!');
+                } else {
+                    reindexBtn.textContent = '❌ Reindexing Failed';
+                    reindexBtn.style.background = '#dc3545';
+                    alert('❌ Reindexing failed: ' + data.error);
+                }
+                reindexBtn.disabled = false;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                reindexBtn.textContent = '❌ Reindexing Failed';
+                reindexBtn.style.background = '#dc3545';
+                reindexBtn.disabled = false;
+                alert('❌ Reindexing failed due to network error');
+            });
+        }
+
+        // Original Query Functions
         function setQuery(query) {
             document.getElementById('queryInput').value = query;
             document.getElementById('queryInput').focus();
