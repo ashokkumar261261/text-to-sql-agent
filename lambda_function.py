@@ -1606,7 +1606,7 @@ def get_knowledge_base_context(bedrock_agent, query):
 def generate_enhanced_sql_with_bedrock(bedrock_runtime, query, kb_context):
     """Generate enhanced SQL query using Bedrock LLM + Knowledge Base context"""
     
-    model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
+    model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.titan-tg1-large')
     database_name = os.environ.get('GLUE_DATABASE', 'text_to_sql_demo')
     
     # Build enhanced prompt with Knowledge Base context
