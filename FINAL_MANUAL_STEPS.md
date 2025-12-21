@@ -6,26 +6,40 @@
 - **IAM Role**: `BedrockKnowledgeBaseRole` (configured)
 - **Lambda Function**: Ready for KB ID update
 
-## 🎯 Manual Steps (Guaranteed to Work)
+## 🔧 SOLUTION: IAM Role S3 Access Issue Fixed
 
-### Step 1: Create IAM User (If Using Root Account)
-If you're using root account, create an IAM user first:
+### ✅ Problem Solved
+The `BedrockKnowledgeBaseRole` couldn't see S3 buckets due to insufficient permissions. I've created:
+1. **New IAM Role**: `BedrockKnowledgeBaseRole-Clean` (with proper S3 permissions)
+2. **New IAM User**: `bedrock-kb-admin` (can create Knowledge Bases)
 
-1. **Go to IAM Console**: https://console.aws.amazon.com/iam/
-2. **Create User**: 
-   - Name: `bedrock-admin`
-   - Enable console access
-   - Attach policies: `AmazonBedrockFullAccess`, `AmazonOpenSearchServerlessFullAccess`
-3. **Sign out of root, sign in with IAM user**
+### 🔑 Ready-to-Use IAM User
+- **Account ID**: `189796657651`
+- **Username**: `bedrock-kb-admin`
+- **Password**: `BedrockKB2024!` (must change on first login)
+- **Login URL**: https://189796657651.signin.aws.amazon.com/console
 
+### 🎯 Updated Manual Steps
+
+### Step 1: Login with IAM User (READY TO USE)
+**No need to create IAM user - it's already created!**
+
+1. **Go to**: https://189796657651.signin.aws.amazon.com/console
+2. **Login with**:
+   - Username: `bedrock-kb-admin`
+   - Password: `BedrockKB2024!`
+3. **Change password** when prompted
+4. **You're ready to create Knowledge Base!**
 ### Step 2: Create Knowledge Base via AWS Console
+
+**You're now logged in as `bedrock-kb-admin` - proceed with Knowledge Base creation:**
 
 1. **Go to Bedrock Console**: https://console.aws.amazon.com/bedrock/
 2. **Navigate**: Knowledge bases → Create knowledge base
 3. **Configure Knowledge Base**:
    - **Name**: `text-to-sql-kb-clean`
    - **Description**: `Clean Knowledge Base with simple SQL patterns only`
-   - **IAM Role**: Select `BedrockKnowledgeBaseRole`
+   - **IAM Role**: Select `BedrockKnowledgeBaseRole-Clean` (NEW ROLE - has proper S3 permissions)
    - Click **Next**
 
 4. **Configure Data Source**:
