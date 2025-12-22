@@ -1,8 +1,0 @@
-{
-    "inputText": "Generate SQL query to find top 5 customers by revenue from customers and orders tables",
-    "textGenerationConfig": {
-        "maxTokenCount": 300,
-        "temperature": 0.1,
-        "topP": 0.9
-    }
-}
