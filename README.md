@@ -257,42 +257,40 @@ sequenceDiagram
 
 ### **� B usiness Analytics**
 ```sql
--- Natural Language: "Show me monthly revenue trends"
-SELECT 
-    DATE_TRUNC('month', order_date) as month,
-    SUM(total_amount) as revenue
-FROM orders 
-GROUP BY month 
-ORDER BY month;
+-- Natural Language: "Show me top 5 customers by revenue"
+SELECT c.name, SUM(o.total_amount) as revenue 
+FROM text_to_sql_demo.customers c 
+JOIN text_to_sql_demo.orders o 
+ON c.customer_id = o.customer_id 
+WHERE o.status = 'Delivered' 
+GROUP BY c.customer_id, c.name 
+ORDER BY revenue DESC 
+LIMIT 5;
 ```
 
 ### **🎯 Customer Insights**
 ```sql
--- Natural Language: "Find high-value customers in Texas"
-SELECT 
-    c.name, 
-    c.state,
-    SUM(o.total_amount) as lifetime_value
-FROM customers c
-JOIN orders o ON c.customer_id = o.customer_id
-WHERE c.state = 'Texas'
-GROUP BY c.customer_id, c.name, c.state
-HAVING lifetime_value > 1000
-ORDER BY lifetime_value DESC;
+-- Natural Language: "Find customers at risk of churning"
+SELECT c.name, c.email, MAX(o.order_date) as last_order, date_diff('day', MAX(o.order_date), 
+CURRENT_DATE) as days_ago 
+FROM text_to_sql_demo.customers c 
+LEFT JOIN text_to_sql_demo.orders o 
+ON c.customer_id = o.customer_id 
+WHERE o.status = 'Delivered' 
+GROUP BY c.customer_id, c.name, c.email 
+ORDER BY days_ago DESC NULLS FIRST;
 ```
 
 ### **📈 Product Performance**
 ```sql
--- Natural Language: "What are the top selling products by category?"
-SELECT 
-    p.category,
-    p.name,
-    COUNT(o.order_id) as order_count,
-    SUM(o.quantity) as total_sold
-FROM products p
-JOIN orders o ON p.product_id = o.product_id
-GROUP BY p.category, p.name
-ORDER BY total_sold DESC;
+-- Natural Language: Compare sales performance by region?"
+SELECT c.state, SUM(o.total_amount) as total_revenue 
+FROM text_to_sql_demo.customers c 
+JOIN text_to_sql_demo.orders o 
+ON c.customer_id = o.customer_id 
+WHERE o.status = 'Delivered' 
+GROUP BY c.state 
+ORDER BY total_revenue DESC;
 ```
 
 ---
@@ -302,7 +300,6 @@ ORDER BY total_sold DESC;
 | Metric | Performance | Details |
 |--------|-------------|---------|
 | **API Response Time** | < 2 seconds | AI-powered SQL generation via Lambda |
-| **Cold Start** | < 1 second | Optimized Lambda function with embedded schema |
 | **Concurrent Requests** | 1000+ | API Gateway + Lambda auto-scaling |
 | **Query Execution** | Athena speed | Depends on data size and complexity |
 | **Data Volume** | Petabyte scale | AWS Athena capabilities |
