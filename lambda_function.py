@@ -1632,36 +1632,20 @@ ESSENTIAL BUSINESS CONTEXT:
 - Include meaningful aliases for calculated fields (total_revenue, order_count, etc.)
 """
     
-    prompt = f"""You are an expert AWS Athena SQL analyst. Convert the natural language query into optimized Athena SQL using the provided database schema and business context.
-
-DATABASE: {database_name}
+    prompt = f"""Convert this question to SQL using the Knowledge Base examples.
 
 {kb_context_text}
 
-ATHENA-SPECIFIC LIMITATIONS (CRITICAL):
-1. CANNOT use column aliases in HAVING clause
-2. CANNOT use CASE expressions in HAVING clause  
-3. Use subqueries instead when filtering on calculated columns
-4. For date differences: Use date_diff('day', start_date, end_date)
-5. For current date: Use CURRENT_DATE
-6. Status values are case-sensitive: 'Delivered', 'Shipped', 'Processing'
+RULES:
+- Use table prefix: {database_name}.table_name  
+- Include customer name and email in results
+- Use 'Delivered' status for revenue calculations
+- Include all non-aggregate columns in GROUP BY
+- Follow the exact patterns from Knowledge Base examples
 
-SQL GENERATION RULES:
-1. ALWAYS prefix tables: {database_name}.table_name
-2. Use exact column names from the Knowledge Base schema
-3. For customer revenue: JOIN customers + orders, SUM(total_amount)
-4. Always include LIMIT for large results (default LIMIT 5 for top queries)
-5. Use proper aggregation with GROUP BY - INCLUDE ALL non-aggregate columns in GROUP BY
-6. Handle NULL values with NULLS LAST in ORDER BY
-7. Use meaningful column aliases for calculated fields
-8. Keep queries simple and avoid complex HAVING clauses
-9. CRITICAL: When using GROUP BY, ALL non-aggregate columns in SELECT must be in GROUP BY clause
+QUESTION: "{query}"
 
-QUERY TO CONVERT: "{query}"
-
-Generate ONLY the SQL query. No explanations, markdown formatting, or additional text.
-
-SQL Query:"""
+Generate only the SQL query:"""
 
     try:
         print(f"Generating SQL with model: {model_id}")
