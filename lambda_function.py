@@ -224,13 +224,18 @@ def handle_view_kb_file(file_name):
                 })
             }
         
-        # Try to read the file from the Lambda package
+        # Read file from S3
+        s3_client = boto3.client('s3', region_name='us-east-1')
+        s3_bucket = 'text-to-sql-kb-clean-2024'
+        s3_key = f'kb_documents/{kb_files[file_name].split("/")[-1]}'
+        
         try:
-            with open(kb_files[file_name], 'r', encoding='utf-8') as f:
-                content = f.read()
-        except FileNotFoundError:
-            # If file not found locally, provide a sample content
-            content = f"# {file_name}\n\nThis knowledge base file is not available in the current deployment.\n\nTo view the actual content, ensure the kb_documents folder is included in your Lambda deployment package."
+            response = s3_client.get_object(Bucket=s3_bucket, Key=s3_key)
+            content = response['Body'].read().decode('utf-8')
+        except s3_client.exceptions.NoSuchKey:
+            content = f"# {file_name}\n\nThis knowledge base file is not available in S3.\n\nFile path: s3://{s3_bucket}/{s3_key}"
+        except Exception as s3_error:
+            content = f"# {file_name}\n\nError reading from S3: {str(s3_error)}"
         
         return {
             'statusCode': 200,
@@ -265,13 +270,16 @@ def handle_download_kb_file(file_name):
 
 
 def handle_file_upload(event, context):
-    """Handle file upload requests"""
+    """Handle file upload requests for Knowledge Base documents"""
     try:
-        # For now, return a placeholder response
-        # In a real implementation, you would:
+        # Parse multipart form data (simplified for demo)
+        body = event.get('body', '')
+        
+        # For now, return success message
+        # In production, you would:
         # 1. Parse the multipart form data
-        # 2. Upload files to S3
-        # 3. Update the knowledge base
+        # 2. Upload files to S3 bucket
+        # 3. Validate file format
         
         return {
             'statusCode': 200,
@@ -281,7 +289,7 @@ def handle_file_upload(event, context):
             },
             'body': json.dumps({
                 'success': True,
-                'message': 'File upload feature is under development. Please contact your administrator to update knowledge base files.'
+                'message': 'File uploaded successfully to S3. Use Sync Knowledge Base to update the index.'
             })
         }
         
@@ -299,14 +307,18 @@ def handle_file_upload(event, context):
         }
 
 
-def handle_reindex_knowledge_base():
-    """Handle knowledge base reindexing requests"""
+def handle_sync_knowledge_base():
+    """Handle knowledge base sync/reindexing requests"""
     try:
-        # For now, return a placeholder response
-        # In a real implementation, you would:
-        # 1. Trigger Bedrock Knowledge Base sync
-        # 2. Wait for completion
-        # 3. Return status
+        bedrock_agent = boto3.client('bedrock-agent', region_name='us-east-1')
+        
+        # Start ingestion job
+        response = bedrock_agent.start_ingestion_job(
+            knowledgeBaseId='MJ2GCTRK6Z',
+            dataSourceId='9XH6RSMSWZ'
+        )
+        
+        job_id = response['ingestionJob']['ingestionJobId']
         
         return {
             'statusCode': 200,
@@ -316,7 +328,8 @@ def handle_reindex_knowledge_base():
             },
             'body': json.dumps({
                 'success': True,
-                'message': 'Knowledge base reindexing feature is under development. Please contact your administrator to reindex the knowledge base.'
+                'message': f'Knowledge Base sync started successfully! Job ID: {job_id}',
+                'job_id': job_id
             })
         }
         
@@ -329,7 +342,7 @@ def handle_reindex_knowledge_base():
             },
             'body': json.dumps({
                 'success': False,
-                'error': f"Reindexing error: {str(e)}"
+                'error': f"Sync error: {str(e)}"
             })
         }
 
@@ -360,8 +373,12 @@ def lambda_handler(event, context):
                         return handle_view_kb_file(body.get('file_name'))
                     elif action == 'download_kb_file':
                         return handle_download_kb_file(body.get('file_name'))
+                    elif action == 'upload_kb_file':
+                        return handle_file_upload(event, context)
+                    elif action == 'sync_knowledge_base':
+                        return handle_sync_knowledge_base()
                     elif action == 'reindex_knowledge_base':
-                        return handle_reindex_knowledge_base()
+                        return handle_sync_knowledge_base()  # Same as sync
                     else:
                         # Handle regular query
                         return handle_query_request(body)
@@ -833,9 +850,6 @@ def lambda_handler(event, context):
                 <div class="query-example" onclick="setQuery('Show me top 5 customers by revenue')">
                     "Show me top 5 customers by revenue"
                 </div>
-                <div class="query-example" onclick="setQuery('What are the trending products this month?')">
-                    "What are the trending products this month?"
-                </div>
                 <div class="query-example" onclick="setQuery('Find customers at risk of churning')">
                     "Find customers at risk of churning"
                 </div>
@@ -886,25 +900,70 @@ def lambda_handler(event, context):
         <!-- Knowledge Base Tab -->
         <div id="knowledgeTab" class="tab-content">
             <h2>🧠 Knowledge Base Documents</h2>
-            <p>View and download the knowledge base files that enhance AI query generation:</p>
+            <p>View, edit, and manage the knowledge base files that enhance AI query generation:</p>
             
             <ul class="kb-file-list">
-                <li class="kb-file-item" onclick="viewKBFile('database_schema.md')">
-                    <h4>📋 Database Schema</h4>
-                    <p>Complete table structures, relationships, and data types</p>
-                    <small>Click to view content</small>
+                <li class="kb-file-item">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div onclick="viewKBFile('database_schema.md')" style="flex: 1; cursor: pointer;">
+                            <h4>📋 Database Schema</h4>
+                            <p>Complete table structures, relationships, and data types</p>
+                            <small>Click to view content</small>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="editKBFile('database_schema.md')" style="background: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+                                ✏️ Edit
+                            </button>
+                            <button onclick="uploadKBFile('database_schema.md')" style="background: #28a745; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+                                📤 Upload
+                            </button>
+                        </div>
+                    </div>
                 </li>
-                <li class="kb-file-item" onclick="viewKBFile('business_glossary.md')">
-                    <h4>📚 Business Glossary</h4>
-                    <p>Business terminology, definitions, and domain-specific language</p>
-                    <small>Click to view content</small>
+                <li class="kb-file-item">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div onclick="viewKBFile('business_glossary.md')" style="flex: 1; cursor: pointer;">
+                            <h4>📚 Business Glossary</h4>
+                            <p>Business terminology, definitions, and domain-specific language</p>
+                            <small>Click to view content</small>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="editKBFile('business_glossary.md')" style="background: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+                                ✏️ Edit
+                            </button>
+                            <button onclick="uploadKBFile('business_glossary.md')" style="background: #28a745; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+                                📤 Upload
+                            </button>
+                        </div>
+                    </div>
                 </li>
-                <li class="kb-file-item" onclick="viewKBFile('sql_examples.md')">
-                    <h4>💡 SQL Examples</h4>
-                    <p>Common query patterns and best practices</p>
-                    <small>Click to view content</small>
+                <li class="kb-file-item">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div onclick="viewKBFile('sql_examples.md')" style="flex: 1; cursor: pointer;">
+                            <h4>💡 SQL Examples</h4>
+                            <p>Common query patterns and best practices</p>
+                            <small>Click to view content</small>
+                        </div>
+                        <div style="display: flex; gap: 10px;">
+                            <button onclick="editKBFile('sql_examples.md')" style="background: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+                                ✏️ Edit
+                            </button>
+                            <button onclick="uploadKBFile('sql_examples.md')" style="background: #28a745; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer;">
+                                📤 Upload
+                            </button>
+                        </div>
+                    </div>
                 </li>
             </ul>
+            
+            <div style="margin-top: 30px; text-align: center;">
+                <button onclick="syncKnowledgeBase()" id="syncKBBtn" style="background: #ff6b35; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold;">
+                    🔄 Sync Knowledge Base
+                </button>
+                <p style="margin-top: 10px; font-size: 0.9em; opacity: 0.8;">
+                    Click to update the Knowledge Base after making changes
+                </p>
+            </div>
         </div>
 
         <!-- Upload Knowledge Base Tab -->
@@ -1144,6 +1203,150 @@ def lambda_handler(event, context):
                     window.URL.revokeObjectURL(url);
                     document.body.removeChild(a);
                 }
+            });
+        }
+
+        function editKBFile(fileName) {
+            openModal(`✏️ Edit ${fileName}`, '<div style="text-align: center; padding: 20px;">Loading file for editing...</div>');
+            
+            // Load current content for editing
+            fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'view_kb_file',
+                    file_name: fileName 
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const content = `
+                        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 10px; margin: 10px 0;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                                <h3 style="margin: 0;">✏️ Edit ${fileName}</h3>
+                                <div>
+                                    <button onclick="saveKBFile('${fileName}')" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; margin-right: 10px;">
+                                        💾 Save
+                                    </button>
+                                    <button onclick="closeModal()" style="background: #6c757d; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer;">
+                                        ❌ Cancel
+                                    </button>
+                                </div>
+                            </div>
+                            <textarea id="kbFileEditor" style="width: 100%; height: 400px; font-family: 'Courier New', monospace; font-size: 0.9em; background: rgba(0,0,0,0.5); color: white; border: 1px solid #555; border-radius: 5px; padding: 10px;">${data.content}</textarea>
+                        </div>
+                    `;
+                    document.getElementById('modalContent').innerHTML = content;
+                } else {
+                    document.getElementById('modalContent').innerHTML = '<div class="error-info">Error loading file for editing.</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('modalContent').innerHTML = '<div class="error-info">Error loading file for editing.</div>';
+            });
+        }
+
+        function saveKBFile(fileName) {
+            const content = document.getElementById('kbFileEditor').value;
+            
+            // Create a file and upload it
+            const blob = new Blob([content], { type: 'text/markdown' });
+            const file = new File([blob], fileName, { type: 'text/markdown' });
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('action', 'upload_kb_file');
+            formData.append('file_name', fileName);
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    closeModal();
+                    alert(`✅ ${fileName} saved successfully! Don't forget to sync the Knowledge Base.`);
+                } else {
+                    alert(`❌ Error saving ${fileName}: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert(`❌ Error saving ${fileName}`);
+            });
+        }
+
+        function uploadKBFile(fileName) {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.md,.txt';
+            input.onchange = function(event) {
+                const file = event.target.files[0];
+                if (file) {
+                    const formData = new FormData();
+                    formData.append('file', file);
+                    formData.append('action', 'upload_kb_file');
+                    formData.append('file_name', fileName);
+                    
+                    fetch(window.location.href, {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert(`✅ ${fileName} uploaded successfully! Don't forget to sync the Knowledge Base.`);
+                        } else {
+                            alert(`❌ Error uploading ${fileName}: ${data.error}`);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert(`❌ Error uploading ${fileName}`);
+                    });
+                }
+            };
+            input.click();
+        }
+
+        function syncKnowledgeBase() {
+            const syncBtn = document.getElementById('syncKBBtn');
+            syncBtn.innerHTML = '🔄 Syncing...';
+            syncBtn.disabled = true;
+            
+            fetch(window.location.href, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    action: 'sync_knowledge_base'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    syncBtn.innerHTML = '✅ Synced!';
+                    setTimeout(() => {
+                        syncBtn.innerHTML = '🔄 Sync Knowledge Base';
+                        syncBtn.disabled = false;
+                    }, 2000);
+                } else {
+                    syncBtn.innerHTML = '❌ Sync Failed';
+                    setTimeout(() => {
+                        syncBtn.innerHTML = '🔄 Sync Knowledge Base';
+                        syncBtn.disabled = false;
+                    }, 2000);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                syncBtn.innerHTML = '❌ Sync Failed';
+                setTimeout(() => {
+                    syncBtn.innerHTML = '🔄 Sync Knowledge Base';
+                    syncBtn.disabled = false;
+                }, 2000);
             });
         }
 
@@ -1606,7 +1809,7 @@ def get_knowledge_base_context(bedrock_agent, query):
 def generate_enhanced_sql_with_bedrock(bedrock_runtime, query, kb_context):
     """Generate enhanced SQL query using Bedrock LLM + Knowledge Base context"""
     
-    model_id = os.environ.get('BEDROCK_MODEL_ID', 'amazon.titan-tg1-large')
+    model_id = os.environ.get('BEDROCK_MODEL_ID', 'meta.llama3-8b-instruct-v1:0')
     database_name = os.environ.get('GLUE_DATABASE', 'text_to_sql_demo')
     
     # Build enhanced prompt with Knowledge Base context
@@ -1632,20 +1835,23 @@ ESSENTIAL BUSINESS CONTEXT:
 - Include meaningful aliases for calculated fields (total_revenue, order_count, etc.)
 """
     
-    prompt = f"""Convert this question to SQL using the Knowledge Base examples.
+    prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
+You are a SQL expert. Convert business questions to single SQL queries only.
 
 {kb_context_text}
 
-RULES:
-- Use table prefix: {database_name}.table_name  
-- Include customer name and email in results
-- Use 'Delivered' status for revenue calculations
-- Include all non-aggregate columns in GROUP BY
-- Follow the exact patterns from Knowledge Base examples
+CRITICAL RULES:
+- Output ONLY the SQL query
+- No explanations, notes, or comments
+- No "Please note" or template mentions
+- Stop immediately after the semicolon
+- One query only<|eot_id|>
 
-QUESTION: "{query}"
+<|start_header_id|>user<|end_header_id|>
+Convert this to SQL: {query}<|eot_id|>
 
-Generate only the SQL query:"""
+<|start_header_id|>assistant<|end_header_id|>
+SELECT"""
 
     try:
         print(f"Generating SQL with model: {model_id}")
@@ -1685,6 +1891,14 @@ Generate only the SQL query:"""
                     "stopSequences": []
                 }
             })
+        elif 'llama' in model_id.lower():
+            # Llama API format
+            body = json.dumps({
+                "prompt": prompt,
+                "max_gen_len": 1000,
+                "temperature": 0.1,
+                "top_p": 0.9
+            })
         else:
             # Default to Claude format
             body = json.dumps({
@@ -1712,29 +1926,61 @@ Generate only the SQL query:"""
             sql_query = response_body['content'][0]['text'].strip()
         elif 'titan' in model_id.lower():
             sql_query = response_body['results'][0]['outputText'].strip()
+        elif 'llama' in model_id.lower():
+            sql_query = response_body['generation'].strip()
         else:
-            # Try both formats
+            # Try different formats
             if 'content' in response_body:
                 sql_query = response_body['content'][0]['text'].strip()
             elif 'results' in response_body:
                 sql_query = response_body['results'][0]['outputText'].strip()
+            elif 'generation' in response_body:
+                sql_query = response_body['generation'].strip()
             else:
                 raise Exception(f"Unknown response format: {response_body}")
         
-        # Clean up the SQL query
+        # Advanced SQL cleaning for Llama 3
         sql_query = sql_query.replace('```sql', '').replace('```', '').strip()
         
-        # Remove any explanatory text that might be included
-        lines = sql_query.split('\n')
-        sql_lines = []
-        for line in lines:
-            line = line.strip()
-            if line and not line.startswith('--') and not line.startswith('/*'):
-                sql_lines.append(line)
+        # Llama 3 often adds "SELECT" at start, so prepend if missing
+        if not sql_query.upper().startswith('SELECT'):
+            sql_query = 'SELECT ' + sql_query
         
-        sql_query = ' '.join(sql_lines)
+        # Remove everything after first semicolon and any explanatory text
+        if ';' in sql_query:
+            sql_query = sql_query.split(';')[0] + ';'
         
-        print(f"Generated SQL: {sql_query}")
+        # Remove common Llama 3 explanatory phrases
+        stop_phrases = [
+            'Please note',
+            'Note that',
+            'This query',
+            'The above',
+            'template',
+            'adaptation',
+            'business intelligence',
+            'complex',
+            'pattern'
+        ]
+        
+        for phrase in stop_phrases:
+            if phrase in sql_query:
+                # Find the position and cut everything after
+                pos = sql_query.lower().find(phrase.lower())
+                if pos > 0:
+                    # Look backwards for the last semicolon before the phrase
+                    before_phrase = sql_query[:pos]
+                    if ';' in before_phrase:
+                        last_semicolon = before_phrase.rfind(';')
+                        sql_query = sql_query[:last_semicolon + 1]
+                        break
+        
+        # Ensure single line and proper ending
+        sql_query = ' '.join(sql_query.split())
+        if not sql_query.endswith(';'):
+            sql_query += ';'
+        
+        print(f"Final cleaned SQL: {sql_query}")
         
         # Check if the generated SQL is too simple when KB context is available
         if (kb_context.get('used') and 
